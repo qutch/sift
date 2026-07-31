@@ -51,7 +51,7 @@ class Parser:
         print("parsing pdf: " + filePath.name)
         print("file location: " + str(filePath))
         
-        pages = self.pdfParser.is_complex(filePath)
+        pages = LiteParse.is_complex(self.heavyPDFParser, filePath)
         if any(p.needs_ocr for p in pages):
             output = self.heavyPDFParser.parse(filePath)
             text = ""
@@ -78,17 +78,19 @@ class Parser:
     def GetFileMetadata(self, filePath: Path):
         # Return metadata such as: size and type
         type = filePath.suffix[1:]
+        name = filePath.name
+        location = filePath
         size = filePath.stat().st_size # in bytes
         created_at = datetime.fromtimestamp(filePath.stat().st_birthtime).strftime('%Y-%m-%d %H:%M:%S')
         last_edited = datetime.fromtimestamp(filePath.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
         last_opened = datetime.fromtimestamp(filePath.stat().st_atime).strftime('%Y-%m-%d %H:%M:%S')
 
 
-        return {'type': type, 'size': size, 'created': created_at, 'edited': last_edited, 'opened': last_opened}
+        return {'name': name, 'type': type,'path': location, 'size': size, 'created': created_at, 'edited': last_edited, 'opened': last_opened}
 
 
-if __name__ == "__main__":
-    p = Parser()
-    userInput = input("Enter a file path: ")
-    output = p.ParseFile(userInput)
-    print(output)
+# if __name__ == "__main__":
+#     p = Parser()
+#     userInput = input("Enter a file path: ")
+#     output = p.ParseFile(userInput)
+#     print(output)
