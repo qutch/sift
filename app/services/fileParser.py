@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime
 
 # Import parsing services
 import pymupdf4llm as pypdf
@@ -20,18 +21,17 @@ class Parser:
     def ParseFile(self, filePath: str) -> str:
         path = Path(filePath)
         fileType = path.suffix[1:]
-        
+
+        metadata = self.GetFileMetadata(path)
+
         if fileType in self.textExtensions:
-            return self.ParseText(path)
+            return (self.ParseText(path), metadata)
 
         elif fileType in self.codeExtensions:
-            return self.ParseText(path)
+            return (self.ParseText(path), metadata)
 
         elif fileType in self.pdfExtensions:
-            return self.ParsePDF(path)
-
-        # elif fileType in self.imageExtensions:
-        #     return self.ParseImage(path)
+            return (self.ParsePDF(path), metadata)
 
         else:
             return None
@@ -75,8 +75,20 @@ class Parser:
         print("parsing image: " + filePath)
         return None
 
+    def GetFileMetadata(self, filePath: Path):
+        # Return metadata such as: size and type
+        type = filePath.suffix[1:]
+        size = filePath.stat().st_size # in bytes
+        created_at = datetime.fromtimestamp(filePath.stat().st_birthtime).strftime('%Y-%m-%d %H:%M:%S')
+        last_edited = datetime.fromtimestamp(filePath.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+        last_opened = datetime.fromtimestamp(filePath.stat().st_atime).strftime('%Y-%m-%d %H:%M:%S')
+
+
+        return {'type': type, 'size': size, 'created': created_at, 'edited': last_edited, 'opened': last_opened}
+
 
 if __name__ == "__main__":
     p = Parser()
     userInput = input("Enter a file path: ")
     output = p.ParseFile(userInput)
+    print(output)
