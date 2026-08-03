@@ -1,12 +1,14 @@
 from pathlib import Path
 from datetime import datetime
+from classes.File import File
+from llamaService import Summarizer
 
 # Import parsing services
 import pymupdf4llm as pypdf
 from liteparse import LiteParse
 
 class Parser:
-    
+
     def __init__(self):
         # Extensions initialization
         self.textExtensions = ["txt", "md"]
@@ -18,23 +20,38 @@ class Parser:
         self.lightPDFParser = LiteParse(ocr_enabled=False, output_format="text")
 
 
-    def ParseFile(self, filePath: str) -> str:
+    def ParseFile(self, filePath: Path) -> File:
         path = Path(filePath)
         fileType = path.suffix[1:]
 
         metadata = self.GetFileMetadata(path)
 
+        parsedFile: File = None
+        parsedText: str = None
+
         if fileType in self.textExtensions:
-            return (self.ParseText(path), metadata)
+            parsedText = self.ParseText(path)
 
         elif fileType in self.codeExtensions:
-            return (self.ParseText(path), metadata)
+            parsedText = self.ParseText(path)
 
         elif fileType in self.pdfExtensions:
-            return (self.ParsePDF(path), metadata)
+            parsedText = self.ParsePDF(path)
+
+        if parsedText != None:
+            parsedFile = File(parsedText, Path(filePath), metadata.get('name'), metadata.get('type'))
+            
+            parsedFile.SetCreatedAt(metadata.get('createdAt'))
+            parsedFile.SetLastOpened(metadata.get('lastOpened'))
+            parsedFile.SetLastEdited(metadata.get('lastEdited'))
+            parsedFile.SetSize(metadata.get('size'))
+            parsedFile.SetSummary(self.GetSummary(parsedText))
 
         else:
+            print('something went wrong')
             return None
+
+        return parsedFile
 
 
     def ParseText(self, filePath: Path) -> str:
@@ -81,16 +98,13 @@ class Parser:
         name = filePath.name
         location = filePath
         size = filePath.stat().st_size # in bytes
-        created_at = datetime.fromtimestamp(filePath.stat().st_birthtime).strftime('%Y-%m-%d %H:%M:%S')
-        last_edited = datetime.fromtimestamp(filePath.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
-        last_opened = datetime.fromtimestamp(filePath.stat().st_atime).strftime('%Y-%m-%d %H:%M:%S')
+        createdAt = datetime.fromtimestamp(filePath.stat().st_birthtime).strftime('%Y-%m-%d %H:%M:%S')
+        lastEdited = datetime.fromtimestamp(filePath.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+        lastOpened = datetime.fromtimestamp(filePath.stat().st_atime).strftime('%Y-%m-%d %H:%M:%S')
+
+        return {'name': name, 'type': type,'path': location, 'size': size, 'created': createdAt, 'lastEdited': lastEdited, 'lastOpened': lastOpened}
 
 
-        return {'name': name, 'type': type,'path': location, 'size': size, 'created': created_at, 'edited': last_edited, 'opened': last_opened}
-
-
-# if __name__ == "__main__":
-#     p = Parser()
-#     userInput = input("Enter a file path: ")
-#     output = p.ParseFile(userInput)
-#     print(output)
+    def GetSummary(self, text: str) -> str:
+        s = Summarizer()
+        return s.Summarize(text)

@@ -1,6 +1,6 @@
 from ollama import chat
 
-class Summarizer:
+class ChunkSummarizer:
 
     summaryPrompt = ""
 
@@ -53,6 +53,23 @@ class Summarizer:
             messages=[
                 {'role':'system', 'content': self.systemPrompt},
                 newMessage
+            ]
+        )
+
+        return response.message.content
+
+
+class Summarizer:
+    def __init__(self):
+        self.model = 'gemma3:1b'
+        self.systemPrompt = "You are a document summarizer. Summarize the text provieded in MAXIMUM 1 short sentence with KEYWORDS INCLUDED."
+    
+    def Summarize(self, text: str):
+        response = chat(
+            model=self.model,
+            messages=[
+                {'role': 'system', 'content': self.systemPrompt},
+                {'role': 'user', 'content': text}
             ]
         )
 
