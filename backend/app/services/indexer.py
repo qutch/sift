@@ -5,35 +5,57 @@
 
 from pathlib import Path
 
-# Returns a list of file paths that are to be indexed
-def process_folder(folder_path: Path, target_types: tuple[str]) -> list[Path]:
+class Indexer:
 
-    target_files = []
+    def __init__(self):
+        pass
 
-    for root, dirs, files in folder_path.walk(top_down=True):
+    # Processes a list of files with matching target type
+    def process_folder(self, folder_path: Path, target_types: tuple[str]) -> list[Path]:
 
-        # Go through each file
-        for file in files:
-            # Check if it matches target file types
-            if file.endswith(target_types):
-                # Add file path to the list of files to process further
-                target_files.append(Path(f"{str(root)}/{file}"))
+        target_files = []
 
-    print("Found " + str(len(target_files)) + " files with matching types of: " + str(target_types))
-    print(target_files)
-    return target_files
+        for root, dirs, files in folder_path.walk(top_down=True):
+
+            # Go through each file
+            for file in files:
+                # Check if it matches target file types
+                if file.endswith(target_types):
+                    # Add file path to the list of files to process further
+                    target_files.append(Path(f"{str(root)}/{file}"))
+
+        print("Found " + str(len(target_files)) + " files with matching types of: " + str(target_types))
+        print(target_files)
+        return target_files
 
 
 from fileParser import Parser
+from chunker import Chunker
+from embedder import Embedder
 
 if __name__ == '__main__':
     # path = input("enter directory: ")
     testPath = Path('/users/hutch/desktop/desktop/test-folder')
 
-    files = process_folder(testPath, (".md", ".pdf", ".txt"))
+    i = Indexer()
+    e = Embedder()
+
+    files = i.process_folder(testPath, (".md", ".pdf", ".txt"))
 
     # test parsing
     p = Parser()
+    c = Chunker()
+
     for fileLoc in files:
-        out = p.ParseFile(fileLoc)
-        print(out)
+
+        fileChunks = []
+
+        # Parse file
+        file = p.ParseFile(fileLoc)
+
+        # Chunk file
+        cleanText = c.CleanText(file.text)
+        fileChunks = c.ChunkText(cleanText, 20, 100)
+        file.SetChunks(fileChunks)
+        e.EmbedFileBatch(file)
+        print(file)
