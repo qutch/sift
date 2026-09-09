@@ -1,16 +1,33 @@
 from classes.File import File
+from pathlib import Path
 
 class Vector:
-    def __init__(self, vector, file):
+    """
+    Class that holds a single vector based on a chunk of text.
+    Contains:
+    - Embedded vector
+    - File path
+    - Chunk index
+    - Chunk text
+    """
+    
+    def __init__(self, vector: list[float], filePath: Path, index: int, text: str):
         self.vector: list[float] = vector
-        self.file: File = file
+        self.filePath: Path = filePath
+        self.chunkIndex = index
+        self.chunkText = text
 
     def SetVector(self, vector: list[float]):
         self.vector = vector
 
-    def SetFile(self, file: File):
-        self.file = file
+    # Returns formatted data in the format expected by the lancedb vector schema
+    def FormattedVector(self):
+        data = {}
+        
+        # Set data
+        data['vector'] = self.vector
+        data['filePath'] = self.filePath
+        data['chunkIndex'] = self.chunkIndex
+        data['chunkText'] = self.chunkText
 
-    def SetVectorAndFile(self, vector: list[float], file: File):
-        self.vector = vector
-        self.file = file
+        return data

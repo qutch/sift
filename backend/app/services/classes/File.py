@@ -1,5 +1,6 @@
 from datetime import datetime
 from pathlib import Path
+from Vector import Vector
 
 class File:
     def __init__(self, text: str, path: Path, name: str, extension: str):
@@ -14,6 +15,7 @@ class File:
         self.lastEdited: datetime
         self.createdAt: datetime
         self.chunks: list[str]
+        self.vectors: list[Vector]
 
     def SetSummary(self, summary: str):
         self.summary = summary
@@ -32,6 +34,20 @@ class File:
 
     def SetChunks(self, chunks: list[str]):
         self.chunks = chunks
+
+    # Returns formatted data in the format expected by the lancedb metadata schema
+    def FormattedMetadata(self):
+        data = {
+            'fileType': self.type,
+            'fileName': self.name,
+            'filePath': self.path,
+            'summary': self.summary,
+            'size': self.size,
+            'lastOpened': self.lastOpened,
+            'lastEdited': self.lastEdited,
+            'createdAt': self.createdAt
+        }
+        return data
 
     def __str__(self):
         print(f"--=====-- {self.name} --=====--")

@@ -4,6 +4,8 @@
 # 2. Passes array of file data to embedder --> uploader
 
 from pathlib import Path
+from databaseService import DBService
+from classes.Vector import Vector
 
 class Indexer:
 
@@ -53,9 +55,19 @@ if __name__ == '__main__':
         # Parse file
         file = p.ParseFile(fileLoc)
 
-        # Chunk file
+        # Chunk file and receive chunks
         cleanText = c.CleanText(file.text)
         fileChunks = c.ChunkText(cleanText, 20, 100)
         file.SetChunks(fileChunks)
-        e.EmbedFileBatch(file)
+        
+        # Embed and receive embedded chunks
+        embeddings = e.EmbedFileBatch(file)
         print(file)
+        print(embeddings)
+        
+        # Get data to insert into database
+        formattedMetadata = file.FormattedMetadata()
+        vectors = []
+        
+        # Upload into the database using databaseService
+        db = DBService()

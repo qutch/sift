@@ -1,7 +1,11 @@
-# Takes in a string of text and outputs a list of text chunk
-# text --> the string of text information
-# overlap --> number of characters to overlap
-# chunk_size --> number of characters to make each chunk
+from classes.Vector import Vector
+
+"""
+Takes in a string of text and outputs a list of text chunk
+text --> the string of text information
+overlap --> number of characters to overlap
+chunk_size --> number of characters to make each chunk
+"""
 
 class Chunker:
     

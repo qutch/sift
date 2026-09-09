@@ -20,6 +20,7 @@ class Parser:
         self.lightPDFParser = LiteParse(ocr_enabled=False, output_format="text")
 
 
+    # Parses a file and returns data as a File object
     def ParseFile(self, filePath: Path) -> File:
         path = Path(filePath)
         fileType = path.suffix[1:]
