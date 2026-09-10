@@ -83,6 +83,4 @@ class Chunker:
 
             cleanedText += dirtyText[i]
 
-        print(repr(cleanedText))
-
         return cleanedText

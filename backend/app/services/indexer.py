@@ -42,6 +42,9 @@ if __name__ == '__main__':
     i = Indexer()
     e = Embedder()
 
+    # Initialize the database
+    db = DBService()
+
     files = i.process_folder(testPath, (".md", ".pdf", ".txt"))
 
     # test parsing
@@ -62,12 +65,9 @@ if __name__ == '__main__':
         
         # Embed and receive embedded chunks
         embeddings = e.EmbedFileBatch(file)
-        print(file)
-        print(embeddings)
-        
-        # Get data to insert into database
-        formattedMetadata = file.FormattedMetadata()
-        vectors = []
         
         # Upload into the database using databaseService
-        db = DBService()
+        db.InsertVectors(file)
+        db.InsertMetadata(file)
+
+    db.GetInfo()

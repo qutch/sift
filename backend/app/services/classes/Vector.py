@@ -1,4 +1,3 @@
-from classes.File import File
 from pathlib import Path
 
 class Vector:
@@ -26,8 +25,11 @@ class Vector:
         
         # Set data
         data['vector'] = self.vector
-        data['filePath'] = self.filePath
+        data['filePath'] = str(self.filePath)
         data['chunkIndex'] = self.chunkIndex
         data['chunkText'] = self.chunkText
 
         return data
+
+    def __str__(self):
+        return f"Vector #{self.chunkIndex}: {self.vector}"

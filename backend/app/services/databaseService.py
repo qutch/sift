@@ -19,8 +19,10 @@ class DBService():
         # Create the vector schema
         vectorSchema = pa.schema(
             [
-                pa.field("vector", pa.list_(pa.float16), 1024),
-                pa.field("filePath", pa.string()), # Links vector to metadata --> is unique
+                pa.field("vector", pa.list_(pa.float32(), 1024)),
+                pa.field("filePath", pa.string()),
+                pa.field("chunkIndex", pa.int16()),
+                pa.field("chunkText", pa.string()),
             ]
         )
         # Create the table for vectors
@@ -29,7 +31,7 @@ class DBService():
         # Create the metadata schema
         metadataSchema = pa.schema(
             [
-                pa.field('fileType', pa.string()), # Links metadata to vector --> is unique
+                pa.field('fileType', pa.string()),
                 pa.field("fileName", pa.string()),
                 pa.field("filePath", pa.string()),
                 pa.field("summary", pa.string()),
@@ -42,6 +44,20 @@ class DBService():
         # Create the metadata table
         self.db.create_table("sift-metadata", schema=metadataSchema, mode="overwrite")
 
-    def InsertVector(self, table: str, vector: Vector):
-        targetTable = self.db.open_table(table)
-        targetTable.add(vector.Formatted())
+    def InsertVectors(self, file: File):
+        table = self.db.open_table("sift-vectors")
+        for vector in file.vectors:
+            table.add([vector.FormattedVector()])
+
+    def InsertMetadata(self, file: File):
+        table = self.db.open_table("sift-metadata")
+        table.add([file.FormattedMetadata()])
+
+    def GetInfo(self):
+        db = lance.connect("/users/hutch/desktop/example_lancedb")
+
+        vec_table = db.open_table("sift-vectors")
+        meta_table = db.open_table("sift-metadata")
+
+        print("vectors:", vec_table.count_rows())
+        print("metadata:", meta_table.count_rows())
