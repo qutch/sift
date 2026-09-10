@@ -1,6 +1,7 @@
 import lancedb as lance
 import pyarrow as pa
 from classes import File, Vector, FileType
+from embedder import Embedder
 
 class DBService():
 
@@ -61,3 +62,15 @@ class DBService():
 
         print("vectors:", vec_table.count_rows())
         print("metadata:", meta_table.count_rows())
+
+    def GetChunks(self, query: str):
+        db = lance.connect("/users/hutch/desktop/example_lancedb")
+
+        vec_table = db.open_table("sift-vectors")
+        meta_table = db.open_table("sift-metadata")
+
+        e = Embedder()
+        embeddedQuery = e.EmbedChunk(query).embeddings[0]
+
+        results = vec_table.search(embeddedQuery).limit(5).to_list()
+        return results

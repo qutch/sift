@@ -71,3 +71,6 @@ if __name__ == '__main__':
         db.InsertMetadata(file)
 
     db.GetInfo()
+    chunks = db.GetChunks("Computer Science")
+    for c in chunks:
+        print(c.get('filePath'))
