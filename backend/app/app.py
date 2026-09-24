@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Query
 from pydantic import BaseModel
+from services import indexer, search
 
 app = FastAPI()
 

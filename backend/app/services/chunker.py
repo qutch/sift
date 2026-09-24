@@ -25,6 +25,7 @@ class Chunker:
         chunkAndOverlapSize = chunk_size + overlap
         currentChunk = ""
 
+        # Chunking logic
         while currentIndex < textLength:
             if lastChunkIndex + chunkAndOverlapSize < textLength:
 

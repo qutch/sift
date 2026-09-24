@@ -10,6 +10,7 @@ class DBService():
         self.uri = None
         self.EstablishDatabase()
         self.InitializeDatabase()
+        self.embedder = Embedder()
 
     def EstablishDatabase(self):
         # Connect to local directory for database
@@ -44,33 +45,32 @@ class DBService():
         )
         # Create the metadata table
         self.db.create_table("sift-metadata", schema=metadataSchema, mode="overwrite")
-
+    
+    # Inserts vectors into the DB from a file object
     def InsertVectors(self, file: File):
         table = self.db.open_table("sift-vectors")
         for vector in file.vectors:
             table.add([vector.FormattedVector()])
 
+    # Inserts metadata into the DB from a file object
     def InsertMetadata(self, file: File):
         table = self.db.open_table("sift-metadata")
         table.add([file.FormattedMetadata()])
 
+    # Returns general info on the database's current state
     def GetInfo(self):
-        db = lance.connect("/users/hutch/desktop/example_lancedb")
-
-        vec_table = db.open_table("sift-vectors")
-        meta_table = db.open_table("sift-metadata")
+        vec_table = self.db.open_table("sift-vectors")
+        meta_table = self.db.open_table("sift-metadata")
 
         print("vectors:", vec_table.count_rows())
         print("metadata:", meta_table.count_rows())
 
+    # Returns chunks related to the query, searched by LanceDB
     def GetChunks(self, query: str):
-        db = lance.connect("/users/hutch/desktop/example_lancedb")
+        vec_table = self.db.open_table("sift-vectors")
+        meta_table = self.db.open_table("sift-metadata")
 
-        vec_table = db.open_table("sift-vectors")
-        meta_table = db.open_table("sift-metadata")
-
-        e = Embedder()
-        embeddedQuery = e.EmbedChunk(query).embeddings[0]
+        embeddedQuery = self.embedder.EmbedChunk(query).embeddings[0]
 
         results = vec_table.search(embeddedQuery).limit(5).to_list()
         return results
