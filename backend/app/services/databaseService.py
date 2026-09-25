@@ -27,8 +27,10 @@ class DBService():
                 pa.field("chunkText", pa.string()),
             ]
         )
-        # Create the table for vectors
-        self.db.create_table("sift-vectors", schema=vectorSchema, mode="overwrite")
+        # Create the table for vectors, if it doesn't already exist -
+        # mode="overwrite" here would wipe out previously indexed data
+        # on every app startup
+        self.db.create_table("sift-vectors", schema=vectorSchema, exist_ok=True)
 
         # Create the metadata schema
         metadataSchema = pa.schema(
@@ -43,8 +45,8 @@ class DBService():
                 pa.field("createdAt", pa.date32()),
             ]
         )
-        # Create the metadata table
-        self.db.create_table("sift-metadata", schema=metadataSchema, mode="overwrite")
+        # Create the metadata table, if it doesn't already exist
+        self.db.create_table("sift-metadata", schema=metadataSchema, exist_ok=True)
     
     # Inserts vectors into the DB from a file object
     def InsertVectors(self, file: File):
@@ -64,6 +66,16 @@ class DBService():
 
         print("vectors:", vec_table.count_rows())
         print("metadata:", meta_table.count_rows())
+
+    # Returns metadata rows for the given file paths, keyed by filePath.
+    # Used to enrich ranking/summarization with each file's summary
+    # instead of just its raw chunk text.
+    def GetMetadataForFiles(self, filePaths: list[str]) -> dict[str, dict]:
+        meta_table = self.db.open_table("sift-metadata")
+        rows = meta_table.to_arrow().to_pylist()
+        filePaths = set(filePaths)
+
+        return {row['filePath']: row for row in rows if row['filePath'] in filePaths}
 
     # Returns chunks related to the query, searched by LanceDB
     def GetChunks(self, query: str):
