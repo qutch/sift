@@ -74,11 +74,6 @@ final class SearchModel {
         }
     }
     
-    // TODO
-    func searchRequest(query: String) async throws -> [FileResult] {
-        return []
-    }
-
     // Debounced so we don't hit the backend on every keystroke.
     private func scheduleSearch() {
         searchTask?.cancel()
@@ -102,7 +97,7 @@ final class SearchModel {
     }
 }
 
-/// Placeholder data until the UI is wired to the backend's /search endpoint.
+/// Placeholder data for SwiftUI previews and working on the UI without the backend running.
 struct MockSearchService: SearchService {
     private static let files: [FileResult] = [
         FileResult(path: "~/Documents/notes/meeting-notes.md", summary: "Weekly sync notes about the indexing roadmap."),

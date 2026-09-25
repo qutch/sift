@@ -11,14 +11,21 @@ import UniformTypeIdentifiers
 
 struct SearchView: View {
     @Bindable var model: SearchModel
+    let folders: FolderStore
     var onDismiss: () -> Void = {}
+    var onChooseFolders: () -> Void = {}
+    var onOpenSettings: () -> Void = {}
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
             searchBar
             Divider()
-            fileList
+            if folders.hasFolders {
+                fileList
+            } else {
+                getStartedPrompt
+            }
         }
         .frame(width: SearchPanelController.size.width, height: SearchPanelController.size.height)
         .background(.regularMaterial)
@@ -34,6 +41,7 @@ struct SearchView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 20))
                 .focused($fieldFocused)
+                .disabled(!folders.hasFolders)
                 .onKeyPress(.downArrow) { model.moveSelection(by: 1); return .handled }
                 .onKeyPress(.upArrow) { model.moveSelection(by: -1); return .handled }
                 .onSubmit {
@@ -44,6 +52,12 @@ struct SearchView: View {
             if model.isSearching {
                 ProgressView().controlSize(.small)
             }
+            Button(action: onOpenSettings) {
+                Image(systemName: "gearshape")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Settings")
         }
         .padding(.horizontal, 16)
         .frame(height: 52)
@@ -84,6 +98,25 @@ struct SearchView: View {
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
+    // Shown instead of results until the user has given Sift at least one folder.
+    private var getStartedPrompt: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "folder.badge.plus")
+                .font(.system(size: 40))
+                .foregroundStyle(.secondary)
+            Text("Choose a folder to get started")
+                .font(.title3.weight(.semibold))
+            Text("Sift can only search folders you give it access to. You can change them later in Settings.")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 360)
+            Button("Choose Folder…", action: onChooseFolders)
+                .keyboardShortcut(.defaultAction)
+                .controlSize(.large)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private func open(_ file: FileResult?) {
         guard let file else { return }
         let url = URL(fileURLWithPath: (file.path as NSString).expandingTildeInPath)
@@ -120,5 +153,5 @@ private struct FileRow: View {
 }
 
 #Preview {
-    SearchView(model: SearchModel(service: MockSearchService()))
+    SearchView(model: SearchModel(service: MockSearchService()), folders: FolderStore())
 }
