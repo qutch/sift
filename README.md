@@ -185,13 +185,13 @@ uv sync
 
 ### 3. Configure paths
 
-The database location is currently hardcoded in `backend/app/services/databaseService.py`:
+The database location is currently set in `backend/app/services/databaseService.py`, inside `EstablishDatabase()`. Change `self.uri` to a directory on your machine before running, for example:
 
 ```python
-self.uri = "/users/hutch/desktop/example_lancedb"
+self.uri = "/Users/<your-username>/sift-data/lancedb"
 ```
 
-Change it to a directory on your machine before running.
+LanceDB creates the directory the first time it runs.
 
 ### 4. Run the API
 
