@@ -1,6 +1,10 @@
 from ollama import chat
 from pydantic import BaseModel, Field
 
+# Single chat model shared by every LLM task (summaries, ranking, keywords),
+# so Ollama only keeps this plus the embedding model resident in memory
+CHAT_MODEL = 'gemma3:1b'
+
 class FileRelevance(BaseModel):
     filePath: str
     relevance: int = Field(ge=1, le=10)
@@ -13,13 +17,8 @@ class ChunkSummarizer:
 
     summaryPrompt = ""
 
-    summaryLevel = {
-            1: 'llama3.2:1b',
-            2: 'llama3.2:3b',
-            3: 'gemma3:1b',
-        }
-
     def __init__(self):
+        self.model = CHAT_MODEL
         self.systemPrompt = """You are a keyword extractor. You output ONLY keywords, nothing else.
 
                             RULES:
@@ -50,15 +49,13 @@ class ChunkSummarizer:
 
         self.messages = [{'role':'system', 'content': self.systemPrompt}]
 
-    def summarize(self, level: int, chunk: str) -> str:
-        
-        print("using: " + self.summaryLevel.get(level))
+    def summarize(self, chunk: str) -> str:
 
         newMessage = {'role': 'user','content': 'Text: ' + chunk}
         self.messages.append(newMessage)
 
         response = chat(
-            model=Summarizer.summaryLevel.get(level),
+            model=self.model,
             messages=[
                 {'role':'system', 'content': self.systemPrompt},
                 newMessage
@@ -70,7 +67,7 @@ class ChunkSummarizer:
 
 class Summarizer:
     def __init__(self):
-        self.model = 'gemma3:1b'
+        self.model = CHAT_MODEL
         self.systemPrompt = "You are a document summarizer. Summarize the text provieded in MAXIMUM 1 short sentence with KEYWORDS INCLUDED."
         self.summaryPrompt = "You are a text summarizer. You are to summarize the chunks given to you in order to give it back to the user so they can better understand what they're looking for. Use this prompt for better context. PROMPT: "
     
@@ -102,10 +99,10 @@ class Summarizer:
 
 class Ranker:
     def __init__(self):
-        # Ranking is a reasoning task (compare query against several
-        # candidates), not simple extraction, so it needs a stronger model
-        # than the 1b models used elsewhere in this file
-        self.model = 'llama3.2:3b'
+        # Uses the shared chat model rather than a larger dedicated one to
+        # avoid loading a third model; the forced JSON schema in RankFiles
+        # is what keeps a 1b model's rankings reliable
+        self.model = CHAT_MODEL
         self.rankingPrompt = """You are a file relevance ranker. You will be given a user's
                             search query and a numbered list of files, each with a
                             snippet of its content. Score EVERY file listed, exactly
@@ -166,6 +163,14 @@ class Ranker:
             return [{'filePath': path, 'relevance': None, 'reason': None} for path in fileTexts]
 
         ranked = sorted(result.rankings, key=lambda r: r.relevance, reverse=True)
+
+        # Small models sometimes score the same file more than once or invent
+        # paths, so keep only the highest score for each real candidate file
+        seen = set()
+        ranked = [r for r in ranked
+                  if r.filePath in fileTexts and not (r.filePath in seen or seen.add(r.filePath))]
+        if not ranked:
+            return [{'filePath': path, 'relevance': None, 'reason': None} for path in fileTexts]
 
         if topK is not None:
             ranked = ranked[:topK]

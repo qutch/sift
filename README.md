@@ -6,7 +6,7 @@ Sift is a local semantic file search tool for macOS. Point it at a folder and it
 
 Nothing leaves your computer. There are no cloud APIs, no accounts, and no telemetry. All models run through [Ollama](https://ollama.com), and the index is stored in a local [LanceDB](https://lancedb.com) database.
 
-> **Status:** Early development. The backend indexing and search pipeline works end to end. The macOS frontend UI is built but isn't connected to the backend yet (it uses mock data). See [Roadmap](#roadmap--whats-next).
+> **Status:** Early development. The backend indexing and search pipeline works end to end, and the macOS app sends its searches to the backend API. There's no way to start indexing from the app or API yet. See [Roadmap](#roadmap--whats-next).
 
 ---
 
@@ -32,6 +32,7 @@ Nothing leaves your computer. There are no cloud APIs, no accounts, and no telem
 - **LLM re-ranking:** results from the vector search are re-scored from 1 to 10 by a local LLM, using structured JSON output. Each score comes with a short reason.
 - **Search summaries:** each search returns a natural-language summary of the matching content.
 - **Spotlight-style macOS app:** a menu bar app with a global hotkey (<kbd>⌥ Option</kbd> + <kbd>Space</kbd>) that opens a floating search panel with keyboard navigation.
+- **Folder access controls:** Sift can only see folders you choose. On first launch the search panel asks you to pick a folder, and you can manage the list later in Settings.
 
 ---
 
@@ -67,7 +68,7 @@ Nothing leaves your computer. There are no cloud APIs, no accounts, and no telem
                                      │
                      ┌───────────────┴───────────────┐
                      ▼                               ▼
-          Summarizer (gemma3:1b)            Ranker (llama3.2:3b)
+          Summarizer (gemma3:1b)            Ranker (gemma3:1b)  
           summary of the matches            score each file 1–10
                      │                    (with file summaries as context)
                      └───────────────┬───────────────┘
@@ -109,8 +110,9 @@ Nothing leaves your computer. There are no cloud APIs, no accounts, and no telem
 | Model | Role |
 |-------|------|
 | `qwen3-embedding:0.6b` | Chunk and query embeddings (1024 dims) |
-| `gemma3:1b` | File summaries and search-result summaries |
-| `llama3.2:3b` | Relevance ranking (a reasoning task, so it uses a larger model) |
+| `gemma3:1b` | The single chat model for everything else: file summaries, search-result summaries, and relevance ranking |
+
+Sift intentionally uses only two models, so Ollama keeps at most two resident in memory. The chat model is set in one place, `CHAT_MODEL` in `llamaService.py`.
 
 ### Frontend (macOS)
 
@@ -154,7 +156,10 @@ sift/
             ├── HotKey.swift      # Carbon global hotkey wrapper
             ├── SearchPanel.swift # Floating Spotlight-style panel
             ├── ContentView.swift # Search bar + results list UI
-            └── SearchModel.swift # View model, debounced search, mock service
+            ├── SearchModel.swift # View model, debounced search, mock service
+            ├── APISearchService.swift # HTTP client for the FastAPI backend
+            ├── FolderStore.swift # User-chosen folders, saved as security-scoped bookmarks
+            └── SettingsView.swift # Settings window (manage folders)
 ```
 
 ---
@@ -173,7 +178,6 @@ sift/
 ```bash
 ollama pull qwen3-embedding:0.6b
 ollama pull gemma3:1b
-ollama pull llama3.2:3b
 ```
 
 ### 2. Install backend dependencies
@@ -197,16 +201,14 @@ LanceDB creates the directory the first time it runs.
 
 ```bash
 cd backend/app
-uv run fastapi dev app.py
+uv run uvicorn app:app --reload
 ```
 
-The API runs at `http://127.0.0.1:8000`, and interactive docs are at `/docs`.
-
-> The backend is still being restructured, so some imports and routes may need adjusting before this runs cleanly. See the roadmap below.
+The API runs at `http://127.0.0.1:8000`, and interactive docs are at `/docs`. Ollama must be running for searches to work. The first search after startup is slow (roughly 20 to 30 seconds) while Ollama loads the models.
 
 ### 5. Run the macOS app
 
-Open `frontend/sift-frontend/sift-frontend.xcodeproj` in Xcode and run it. A magnifying glass icon appears in the menu bar. Press <kbd>⌥ Option</kbd> + <kbd>Space</kbd> to open the search panel. Use <kbd>↑</kbd>/<kbd>↓</kbd> to move between results, <kbd>Return</kbd> to open a file, and <kbd>Esc</kbd> to close the panel.
+Start the API first, then open `frontend/sift-frontend/sift-frontend.xcodeproj` in Xcode and run it. The app expects the API at `http://127.0.0.1:8000`; you can change this with `baseURL` in `APISearchService.swift`. A magnifying glass icon appears in the menu bar. Press <kbd>⌥ Option</kbd> + <kbd>Space</kbd> to open the search panel. Use <kbd>↑</kbd>/<kbd>↓</kbd> to move between results, <kbd>Return</kbd> to open a file, and <kbd>Esc</kbd> to close the panel.
 
 ---
 
@@ -215,10 +217,10 @@ Open `frontend/sift-frontend/sift-frontend.xcodeproj` in Xcode and run it. A mag
 | Method | Route | Description |
 |--------|-------|-------------|
 | `GET` | `/` | Health check |
-| `GET` | `/search/{search_query}` | Semantic search. Returns a summary and a ranked file list |
-| `GET` | `/file/{file_path}` | Returns stored metadata for a file |
+| `GET` | `/search?q={query}&numFiles={n}` | Semantic search. Returns a summary and up to `n` ranked files (default 5) |
+| `GET` | `/file/{file_path}` | Returns stored metadata for an indexed file, or a 404 if it isn't indexed |
 
-Example response from `/search/data structures`:
+Example response from `/search?q=data structures`:
 
 ```json
 {
@@ -235,25 +237,26 @@ Example response from `/search/data structures`:
 ## Roadmap / What's Next
 
 ### Connect the frontend to the backend
-- [ ] Replace `MockSearchService` with a real service that calls `GET /search/{query}` (`SearchModel.searchRequest` is still a `TODO`).
-- [ ] Map the backend's `ranking` and `summary` response to `FileResult`, and show the search summary in the panel.
-- [ ] Load real **Recent Files** from the backend (using `lastOpened` metadata) instead of mock data.
+- [x] Replace `MockSearchService` with `APISearchService`, which calls `GET /search`.
+- [ ] Show the overall search `summary` in the panel. Each result row currently shows the ranker's `reason`.
+- [ ] Handle slow searches. Each search takes several seconds, but the panel searches 250 ms after you stop typing. Consider searching only on Return, or returning vector results first.
+- [ ] Add loading, error, and "backend offline" states to the UI.
+- [ ] Load real **Recent Files** with a new backend endpoint (using `lastOpened` metadata). The list is empty for now.
 - [ ] Launch and manage the Python backend from the Mac app, or run it as a background service.
 
 ### Indexing
 - [ ] Add a real indexing entry point. The test driver was removed from `indexer.py`, so there's currently no way to trigger indexing. Options are an API route (e.g. `POST /index`) or a CLI command.
-- [ ] Let users choose which folders to index from the frontend.
+- [x] Let users choose which folders Sift can access (Settings window and first-run prompt).
+- [ ] Send the chosen folders to the backend so it indexes them. The backend doesn't know about them yet.
 - [ ] Implement `watcher.py` to re-index files automatically when they're created, edited, or deleted.
 - [ ] Skip files that haven't changed, and remove stale vectors and metadata when a file is re-indexed or deleted.
 - [ ] Add `.docx` support (`ParseWord` is a stub, and `.docx` is currently sent to the PDF parser).
 - [ ] Add image support (`ParseImage` is a stub). This would need OCR or a vision model for captions.
 
 ### Backend cleanup and fixes
-- [ ] Fix the `open_file` route in `app.py` (it uses `@app(...)` instead of an HTTP method decorator, and its path conflicts with `GET /file/{file_path}`).
-- [ ] Make `GET /file/{file_path}` pass a list to `GetMetadataForFiles`.
-- [ ] Make imports consistent (`services.*` vs. sibling imports) so the API starts from one entry point.
+- [ ] Replace the `sys.path` workaround in `app.py` with proper package imports in `services/`.
 - [ ] Move hardcoded paths (the DB location) and model names into a config file or environment variables.
-- [ ] Fix `ChunkSummarizer` referencing `Summarizer.summaryLevel`, or remove it if it's no longer needed.
+- [ ] Decide whether to use `ChunkSummarizer` (per-chunk keyword extraction) in the pipeline, or remove it.
 - [ ] Replace `print` debugging with proper logging, and add error handling around Ollama calls.
 
 ### Search quality and performance
