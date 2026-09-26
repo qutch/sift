@@ -168,7 +168,7 @@ class Ranker:
         # paths, so keep only the highest score for each real candidate file
         seen = set()
         ranked = [r for r in ranked
-                  if r.filePath in fileTexts and not (r.filePath in seen or seen.add(r.filePath))]
+                if r.filePath in fileTexts and not (r.filePath in seen or seen.add(r.filePath))]
         if not ranked:
             return [{'filePath': path, 'relevance': None, 'reason': None} for path in fileTexts]
 

@@ -26,13 +26,16 @@ final class FolderStore {
 
     private static let defaultsKey = "folderBookmarks"
     private let defaults: UserDefaults
+    private let indexingService: IndexingService
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, indexingService: IndexingService = IndexingService()) {
         self.defaults = defaults
+        self.indexingService = indexingService
         restore()
     }
 
-    /// Shows an open panel and adds whichever folders the user picks.
+    /// Shows an open panel and adds whichever folders the user picks, then
+    /// kicks off backend indexing for each newly granted folder.
     func chooseFolders() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -42,22 +45,45 @@ final class FolderStore {
         panel.message = "Choose the folders you want Sift to search."
         guard panel.runModal() == .OK else { return }
 
+        var added: [AccessibleFolder] = []
         for url in panel.urls where !folders.contains(where: { $0.id == url.path }) {
             do {
                 let bookmark = try Self.makeBookmark(for: url)
                 // The open panel already granted access for this launch.
                 _ = url.startAccessingSecurityScopedResource()
-                folders.append(AccessibleFolder(url: url, bookmark: bookmark))
+                let folder = AccessibleFolder(url: url, bookmark: bookmark)
+                folders.append(folder)
+                added.append(folder)
             } catch {
                 Logger().error("Couldn't save access to \(url.path): \(error)")
             }
         }
         save()
+
+        for folder in added {
+            Task {
+                do {
+                    try await indexingService.processFolder(at: folder.url.path)
+                } catch {
+                    Logger().error("Couldn't start indexing \(folder.url.path): \(error)")
+                }
+            }
+        }
     }
 
     func remove(_ folder: AccessibleFolder) {
         folder.url.stopAccessingSecurityScopedResource()
         folders.removeAll { $0.id == folder.id }
+        save()
+    }
+
+    /// Revokes access to every folder Sift has been given. Used by the
+    /// settings screen's "clear all data" action.
+    func removeAllFolders() {
+        for folder in folders {
+            folder.url.stopAccessingSecurityScopedResource()
+        }
+        folders.removeAll()
         save()
     }
 

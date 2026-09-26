@@ -19,6 +19,37 @@ class Parser:
         self.heavyPDFParser = LiteParse(ocr_enabled=True, output_format="text")
         self.lightPDFParser = LiteParse(ocr_enabled=False, output_format="text")
 
+        self.filesParsed = 0
+        self.totalFiles = 0
+        self.isProcessing = False
+
+    # Resets tracking progress for clean slate
+    def resetTrackingProgress(self):
+        self.filesParsed = 0
+        self.totalFiles = 0
+
+    # Sets the total number of files to parse for progress tracking
+    def setTotalFilesToParse(self, numFiles: int):
+        self.totalFiles = numFiles
+
+    # Increments the filesParse variable by a given int
+    def incrementFilesParsed(self, numFilesParsed: int):
+        self.filesParsed += numFilesParsed
+
+    def StartProcessing(self):
+        self.isProcessing = True
+
+    def StopProcessing(self):
+        self.isProcessing = False
+
+    # Returns current progress, used to back the frontend's processing indicator
+    def GetStatus(self) -> dict:
+        return {
+            'isProcessing': self.isProcessing,
+            'filesParsed': self.filesParsed,
+            'totalFiles': self.totalFiles,
+        }
+
 
     # Parses a file and returns data as a File object
     def ParseFile(self, filePath: Path) -> File:
@@ -49,8 +80,10 @@ class Parser:
             parsedFile.SetSummary(self.GetSummary(parsedText))
 
         else:
-            print('something went wrong')
+            print(f'something went wrong while parsing: {str(filePath)}')
             return None
+
+        self.incrementFilesParsed(1)
 
         return parsedFile
 
@@ -99,9 +132,9 @@ class Parser:
         name = filePath.name
         location = filePath
         size = filePath.stat().st_size # in bytes
-        createdAt = datetime.fromtimestamp(filePath.stat().st_birthtime).strftime('%Y-%m-%d %H:%M:%S')
-        lastEdited = datetime.fromtimestamp(filePath.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
-        lastOpened = datetime.fromtimestamp(filePath.stat().st_atime).strftime('%Y-%m-%d %H:%M:%S')
+        createdAt = datetime.fromtimestamp(filePath.stat().st_birthtime).date()
+        lastEdited = datetime.fromtimestamp(filePath.stat().st_mtime).date()
+        lastOpened = datetime.fromtimestamp(filePath.stat().st_atime).date()
 
         return {'name': name, 'type': type,'path': location, 'size': size, 'created': createdAt, 'lastEdited': lastEdited, 'lastOpened': lastOpened}
 

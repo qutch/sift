@@ -77,6 +77,18 @@ class DBService():
 
         return {row['filePath']: row for row in rows if row['filePath'] in filePaths}
 
+    # Returns metadata for every indexed file, used to back the frontend's
+    # "processed files" list
+    def GetAllMetadata(self) -> list[dict]:
+        meta_table = self.db.open_table("sift-metadata")
+        return meta_table.to_arrow().to_pylist()
+
+    # Wipes all indexed vectors and metadata, then recreates the empty tables
+    def ClearDatabase(self):
+        self.db.drop_table("sift-vectors")
+        self.db.drop_table("sift-metadata")
+        self.InitializeDatabase()
+
     # Returns chunks related to the query, searched by LanceDB
     def GetChunks(self, query: str):
         vec_table = self.db.open_table("sift-vectors")
