@@ -18,6 +18,9 @@ class DBService():
     def __init__(self):
         self._db = None
         self.uri = None
+        # Open table handles, reused across calls: a freshly opened table's
+        # first search costs ~100ms of loading, which was most of a search's latency
+        self.tables = {}
         self.embedder = Embedder()
 
         savedLocation = self.LoadSavedLocation()
@@ -53,6 +56,18 @@ class DBService():
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
         CONFIG_PATH.write_text(json.dumps({"databaseLocation": self.uri}))
 
+    # The open handle for one of Sift's tables. Every read and write goes
+    # through these same handles, so they always see the indexer's latest writes
+    def Table(self, name: str):
+        if self._db is None:
+            raise DatabaseNotConfigured("No data location has been chosen yet")
+        return self.tables[name]
+
+    # Runs one throwaway search so the vector table's data is loaded before
+    # the user's first real query
+    def WarmUp(self):
+        self.Table("sift-vectors").search([0.0] * 1024).limit(1).to_list()
+
     def LoadSavedLocation(self) -> str | None:
         try:
             return json.loads(CONFIG_PATH.read_text()).get("databaseLocation")
@@ -72,7 +87,7 @@ class DBService():
         # Create the table for vectors, if it doesn't already exist -
         # mode="overwrite" here would wipe out previously indexed data
         # on every app startup
-        self.db.create_table("sift-vectors", schema=vectorSchema, exist_ok=True)
+        self.tables["sift-vectors"] = self.db.create_table("sift-vectors", schema=vectorSchema, exist_ok=True)
 
         # Create the metadata schema
         metadataSchema = pa.schema(
@@ -88,7 +103,7 @@ class DBService():
             ]
         )
         # Create the metadata table, if it doesn't already exist
-        self.db.create_table("sift-metadata", schema=metadataSchema, exist_ok=True)
+        self.tables["sift-metadata"] = self.db.create_table("sift-metadata", schema=metadataSchema, exist_ok=True)
     
     # Inserts vectors into the DB from a file object
     def InsertVectors(self, file: File):
@@ -96,23 +111,23 @@ class DBService():
             return
 
         # One add per file: every add commits a new version/fragment in LanceDB
-        table = self.db.open_table("sift-vectors")
+        table = self.Table("sift-vectors")
         table.add([vector.FormattedVector() for vector in file.vectors])
 
     # Inserts metadata into the DB from a file object
     def InsertMetadata(self, file: File):
-        table = self.db.open_table("sift-metadata")
+        table = self.Table("sift-metadata")
         table.add([file.FormattedMetadata()])
 
     # Compacts the small fragments left behind by many inserts
     def OptimizeTables(self):
         for name in ("sift-vectors", "sift-metadata"):
-            self.db.open_table(name).optimize()
+            self.Table(name).optimize()
 
     # Returns general info on the database's current state
     def GetInfo(self):
-        vec_table = self.db.open_table("sift-vectors")
-        meta_table = self.db.open_table("sift-metadata")
+        vec_table = self.Table("sift-vectors")
+        meta_table = self.Table("sift-metadata")
 
         print("vectors:", vec_table.count_rows())
         print("metadata:", meta_table.count_rows())
@@ -123,7 +138,7 @@ class DBService():
         if not filePaths:
             return {}
 
-        meta_table = self.db.open_table("sift-metadata")
+        meta_table = self.Table("sift-metadata")
         # Filter inside LanceDB rather than loading the whole table, since
         # this runs on every search. SQL strings escape ' by doubling it
         quoted = ", ".join("'" + path.replace("'", "''") + "'" for path in filePaths)
@@ -134,7 +149,7 @@ class DBService():
     # Returns metadata for every indexed file, used to back the frontend's
     # "processed files" list
     def GetAllMetadata(self) -> list[dict]:
-        meta_table = self.db.open_table("sift-metadata")
+        meta_table = self.Table("sift-metadata")
         return meta_table.to_arrow().to_pylist()
 
     # Wipes all indexed vectors and metadata, then recreates the empty tables
@@ -145,7 +160,7 @@ class DBService():
 
     # Returns the chunks closest to the query, searched by LanceDB
     def GetChunks(self, query: str, limit: int = 5):
-        vec_table = self.db.open_table("sift-vectors")
+        vec_table = self.Table("sift-vectors")
 
         embeddedQuery = self.embedder.EmbedChunk(query).embeddings[0]
 

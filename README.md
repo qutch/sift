@@ -68,19 +68,20 @@ Nothing leaves your computer. There are no cloud APIs, no accounts, and no telem
 ```
  Query ──▶ embed query ──▶ LanceDB vector search (top 20 chunks → top n files)
                                      │
-                                     ├──▶ ① results: files + their stored summaries   (<1s)
+                                     ├──▶ ① results: files + their stored summaries   (~50–300ms)
                                      ▼
+                  keep only excerpts close to the query
+                                     │
                          Summarizer (gemma3:1b)
-                        summary of the matches
-                                     └──▶ ② summary                                   (~5–10s)
+                                     └──▶ ② summary                                   (~0.5–1.5s)
 ```
 
-`Searcher.Search()` (`search.py`) is a generator, and `/search` streams each stage as a line of JSON as soon as it's ready. The app shows the vector-search results right away and adds the summary when it arrives.
+`Searcher` (`search.py`) builds each stage, and `/search` streams them as lines of JSON as soon as they're ready. The app shows the vector-search results right away and adds the summary when it arrives.
 
 - **Results:** the files with the closest chunks, in vector-distance order, each with the one-line summary generated at index time.
-- **Summary:** a summary of the top matched chunks in relation to the query.
+- **Summary:** one or two sentences on which files relate to the query and what they say about it. Only excerpts within a vector distance of 1.2, and within 0.25 of the best match, are summarized. If nothing is that close, the summary is "No files closely match your search." and the LLM isn't called.
 
-The summary starts as soon as the results are sent, so it still runs to completion if the client disconnects.
+If the client disconnects (for example, because the user kept typing), the backend cancels the summary, so Ollama doesn't keep generating one nobody will see. When the search panel opens, the app calls `/warmup` so the models and the vector table are loaded before the first query.
 
 ### Database schema
 
@@ -223,6 +224,7 @@ Start the API first, then open `frontend/sift-frontend/sift-frontend.xcodeproj` 
 |--------|-------|-------------|
 | `GET` | `/` | Health check |
 | `GET` | `/search?q={query}&numFiles={n}` | Semantic search over up to `n` files (default 5). Streams NDJSON: `results`, then `summary` |
+| `POST` | `/warmup` | Loads the models and vector table in the background so the next search is fast |
 | `GET` / `PUT` | `/database/location` | Where LanceDB stores its data. `PUT` takes `{"path": ...}` |
 | `GET` | `/file/{file_path}` | Returns stored metadata for an indexed file, or a 404 if it isn't indexed |
 | `POST` | `/process/{folder_path}` | Indexes a folder and its sub-folders. The request stays open until indexing finishes |

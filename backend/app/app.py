@@ -1,3 +1,4 @@
+import asyncio
 import json
 import queue
 import sys
@@ -9,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "services"))
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from services.search import Searcher
@@ -60,23 +62,54 @@ def set_database_location(location: DatabaseLocation) -> dict:
 
 # Search with a query, e.g. /search?q=data structures
 # (a query param rather than a path segment so queries can contain '/').
-# Streams newline-delimited JSON, one line per stage (see Searcher.Search), so
-# vector results reach the user right away while the LLM summary catches up.
-# The summary starts as soon as the results are sent, so it still runs to
-# completion if the client disconnects (e.g. the user kept typing)
+# Streams newline-delimited JSON, one line per stage (see Searcher.Results), so
+# vector results reach the user right away while the LLM summary catches up
 @app.get("/search")
-def search(q: str = Query(min_length=1), numFiles: int = 5):
+async def search(request: Request, q: str = Query(min_length=1), numFiles: int = 5):
     # Run the vector search before streaming starts, so a missing database
-    # still comes back as a proper 409 rather than a broken stream
-    stages = searcher.Search(q, numFiles)
-    first = next(stages)
+    # still comes back as a proper 409 rather than a broken stream. It's
+    # blocking LanceDB/Ollama work, so keep it off the event loop
+    results, summaryChunks = await run_in_threadpool(searcher.Results, q, numFiles)
 
-    def lines():
-        yield json.dumps(first, default=str) + "\n"
-        for stage in stages:
-            yield json.dumps(stage, default=str) + "\n"
+    async def lines():
+        yield json.dumps(results, default=str) + "\n"
+
+        # If the user moves on to a new query (the app closes this request),
+        # cancel the summary instead of leaving Ollama generating a stale one
+        # that the next search's summary would have to wait behind
+        summary = asyncio.create_task(searcher.Summary(q, summaryChunks))
+        try:
+            while not summary.done():
+                if await request.is_disconnected():
+                    summary.cancel()
+                    return
+                await asyncio.wait({summary}, timeout=0.1)
+            yield json.dumps(summary.result(), default=str) + "\n"
+        except Exception as e:
+            print(f"Search: summary failed ({e})")
+        finally:
+            summary.cancel()
 
     return StreamingResponse(lines(), media_type="application/x-ndjson")
+
+# Loads the models and search data a query needs, so the first search after
+# the app has sat idle doesn't pay for it. Ollama unloads models after 5 idle
+# minutes, and reloading the embedding model alone added 1-1.5s to a search.
+# Called by the app whenever the search panel opens; returns immediately
+@app.post("/warmup")
+def warmup() -> dict:
+    threading.Thread(target=warmModels, daemon=True).start()
+    return {"status": "warming"}
+
+def warmModels():
+    try:
+        # Embedding model first: it's on the path to the first results
+        embedder.EmbedChunk("warmup")
+        if db.isConfigured:
+            db.WarmUp()
+        summarizer.WarmUp()
+    except Exception as e:
+        print(f"Warmup failed: {e}")
 
 # Grab a single file's metadata
 @app.get("/file/{file_path:path}")

@@ -47,8 +47,17 @@ struct APISearchService: SearchService {
         []
     }
 
-    // Cancelling the consuming task closes the connection. The backend still
-    // finishes a summary it has already started.
+    // Ollama unloads idle models after 5 minutes, and reloading the embedding
+    // model adds over a second to the next search, so this runs every time
+    // the panel opens. The backend returns right away and loads in the background.
+    func warmUp() async {
+        var request = URLRequest(url: baseURL.appending(path: "warmup"))
+        request.httpMethod = "POST"
+        _ = try? await session.data(for: request)
+    }
+
+    // Cancelling the consuming task closes the connection, which makes the
+    // backend cancel the summary rather than finish a stale one.
     func search(_ query: String) -> AsyncThrowingStream<SearchUpdate, Error> {
         var components = URLComponents(url: baseURL.appending(path: "search"), resolvingAgainstBaseURL: false)!
         components.queryItems = [

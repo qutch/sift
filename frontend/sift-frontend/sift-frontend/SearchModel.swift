@@ -26,6 +26,12 @@ enum SearchUpdate {
 protocol SearchService {
     func recentFiles() async -> [FileResult]
     func search(_ query: String) -> AsyncThrowingStream<SearchUpdate, Error>
+    /// Asks the backend to load what a search needs while the user is still typing.
+    func warmUp() async
+}
+
+extension SearchService {
+    func warmUp() async {}
 }
 
 @Observable
@@ -63,6 +69,7 @@ final class SearchModel {
         isSearching = false
         isSummarizing = false
         focusToken += 1
+        Task { await service.warmUp() }
         Task {
             recents = await service.recentFiles()
             selection = recents.first?.id
@@ -89,7 +96,7 @@ final class SearchModel {
     }
     
     // Debounced so we don't hit the backend on every keystroke. Cancelling
-    // the previous search also stops it from delivering a stale summary.
+    // the previous search closes its request, so the backend drops its summary.
     private func scheduleSearch() {
         searchTask?.cancel()
         let q = query.trimmingCharacters(in: .whitespaces)
@@ -103,7 +110,7 @@ final class SearchModel {
         }
         isSearching = true
         searchTask = Task {
-            try? await Task.sleep(for: .milliseconds(250))
+            try? await Task.sleep(for: .milliseconds(150))
             guard !Task.isCancelled else { return }
             do {
                 for try await update in service.search(q) {
