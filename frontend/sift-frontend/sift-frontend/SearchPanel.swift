@@ -39,13 +39,15 @@ final class SearchPanelController: NSObject, NSWindowDelegate {
     private let panel: SearchPanel
     private let model = SearchModel(service: APISearchService())
     private let folders: FolderStore
+    private let indexingStatus: IndexingStatusMonitor
     private let onOpenSettings: () -> Void
     // The open panel takes key focus while it's up; don't treat that as
     // clicking away from the search panel.
     private var isChoosingFolders = false
 
-    init(folders: FolderStore, onOpenSettings: @escaping () -> Void) {
+    init(folders: FolderStore, indexingStatus: IndexingStatusMonitor, onOpenSettings: @escaping () -> Void) {
         self.folders = folders
+        self.indexingStatus = indexingStatus
         self.onOpenSettings = onOpenSettings
         panel = SearchPanel(contentRect: NSRect(origin: .zero, size: Self.size))
         super.init()
@@ -53,6 +55,7 @@ final class SearchPanelController: NSObject, NSWindowDelegate {
 
         let view = SearchView(model: model,
                               folders: folders,
+                              indexingStatus: indexingStatus,
                               onDismiss: { [weak self] in self?.hide() },
                               onChooseFolders: { [weak self] in self?.chooseFolders() },
                               onOpenSettings: { [weak self] in self?.openSettings() })

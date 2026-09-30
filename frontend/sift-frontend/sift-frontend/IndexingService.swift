@@ -23,6 +23,7 @@ struct IndexingStatus: Decodable {
     let isProcessing: Bool
     let filesParsed: Int
     let totalFiles: Int
+    let currentFile: String?
 }
 
 /// Mirrors a single row of the backend's `sift-metadata` LanceDB table.

@@ -18,6 +18,8 @@ struct sift_frontendApp: App {
             Button("Settings…") { appDelegate.settings?.show() }
                 .keyboardShortcut(",")
             Divider()
+            IndexingStatusIndicator(status: appDelegate.indexingStatus.status)
+            Divider()
             Button("Quit Sift") { NSApp.terminate(nil) }
                 .keyboardShortcut("q")
         }

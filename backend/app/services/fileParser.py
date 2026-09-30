@@ -22,11 +22,13 @@ class Parser:
         self.filesParsed = 0
         self.totalFiles = 0
         self.isProcessing = False
+        self.currentFile = None
 
     # Resets tracking progress for clean slate
     def resetTrackingProgress(self):
         self.filesParsed = 0
         self.totalFiles = 0
+        self.currentFile = None
 
     # Sets the total number of files to parse for progress tracking
     def setTotalFilesToParse(self, numFiles: int):
@@ -41,6 +43,7 @@ class Parser:
 
     def StopProcessing(self):
         self.isProcessing = False
+        self.currentFile = None
 
     # Returns current progress, used to back the frontend's processing indicator
     def GetStatus(self) -> dict:
@@ -48,6 +51,7 @@ class Parser:
             'isProcessing': self.isProcessing,
             'filesParsed': self.filesParsed,
             'totalFiles': self.totalFiles,
+            'currentFile': self.currentFile,
         }
 
 
@@ -55,6 +59,8 @@ class Parser:
     def ParseFile(self, filePath: Path) -> File:
         path = Path(filePath)
         fileType = path.suffix[1:]
+
+        self.currentFile = path.name
 
         metadata = self.GetFileMetadata(path)
 
@@ -98,6 +104,7 @@ class Parser:
 
         return output
 
+    # Function to parse a PDF (standard parsing --> OCR if needed)
     def ParsePDF(self, filePath: Path) -> str:
         print("parsing pdf: " + filePath.name)
         print("file location: " + str(filePath))
@@ -113,6 +120,7 @@ class Parser:
             output = self.lightPDFParser.parse(filePath)
             return output
 
+    # Function to parse a word document
     def ParseWord(self, filePath: Path) -> str:
         print("parsing word: " + filePath)
         
@@ -122,6 +130,7 @@ class Parser:
             text += page.text + "\n"
         return output
 
+    # Function to parse an image (not implemented)
     def ParseImage(self, filePath: Path) -> str:
         print("parsing image: " + filePath)
         return None

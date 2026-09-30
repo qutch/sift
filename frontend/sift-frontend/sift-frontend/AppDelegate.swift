@@ -8,6 +8,7 @@ import Carbon.HIToolbox
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let folders = FolderStore()
+    let indexingStatus = IndexingStatusMonitor()
     private(set) var panel: SearchPanelController?
     private(set) var settings: SettingsWindowController?
     private var hotKey: HotKey?
@@ -16,10 +17,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // No dock icon, like Spotlight/Raycast.
         NSApp.setActivationPolicy(.accessory)
 
+        indexingStatus.start()
+
         let settings = SettingsWindowController(folders: folders)
         self.settings = settings
 
-        let panel = SearchPanelController(folders: folders, onOpenSettings: { settings.show() })
+        let panel = SearchPanelController(folders: folders, indexingStatus: indexingStatus, onOpenSettings: { settings.show() })
         self.panel = panel
 
         // First launch (or every saved folder is gone): show the panel so the

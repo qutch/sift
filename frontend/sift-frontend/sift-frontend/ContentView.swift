@@ -12,6 +12,7 @@ import UniformTypeIdentifiers
 struct SearchView: View {
     @Bindable var model: SearchModel
     let folders: FolderStore
+    var indexingStatus: IndexingStatusMonitor?
     var onDismiss: () -> Void = {}
     var onChooseFolders: () -> Void = {}
     var onOpenSettings: () -> Void = {}
@@ -25,6 +26,13 @@ struct SearchView: View {
                 fileList
             } else {
                 getStartedPrompt
+            }
+            if let indexingStatus {
+                Divider()
+                IndexingStatusIndicator(status: indexingStatus.status)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .frame(width: SearchPanelController.size.width, height: SearchPanelController.size.height)
