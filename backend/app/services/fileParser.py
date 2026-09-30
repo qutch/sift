@@ -19,6 +19,9 @@ class Parser:
         self.heavyPDFParser = LiteParse(ocr_enabled=True, output_format="text")
         self.lightPDFParser = LiteParse(ocr_enabled=False, output_format="text")
 
+        # Max characters of a file sent to the LLM for its one-line summary
+        self.summaryMaxChars = 3000
+
         self.filesParsed = 0
         self.totalFiles = 0
         self.isProcessing = False
@@ -83,7 +86,9 @@ class Parser:
             parsedFile.SetLastOpened(metadata.get('lastOpened'))
             parsedFile.SetLastEdited(metadata.get('lastEdited'))
             parsedFile.SetSize(metadata.get('size'))
-            parsedFile.SetSummary(self.GetSummary(parsedText))
+            # Only the start of the file goes to the LLM: a one-line summary
+            # doesn't need the whole document, and long prompts are slow and memory-hungry
+            parsedFile.SetSummary(self.GetSummary(parsedText[:self.summaryMaxChars]))
 
         else:
             print(f'something went wrong while parsing: {str(filePath)}')

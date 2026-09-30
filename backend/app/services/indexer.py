@@ -19,11 +19,25 @@ class Indexer:
 
         self.target_types = (
             ".txt", ".md", ".py", ".java", ".c",
-            ".cpp", ".json", ".xml", ".env", ".toml",
+            ".cpp", ".json", ".xml", ".toml",
             ".pdf", ".docx", ".png", ".jpg", ".jpeg",
         )
         self.chunk_size = 1000
         self.chunk_overlap = 100
+
+        # Directories that hold generated/dependency files rather than the
+        # user's own documents. Hidden directories (".git", ".venv", ...) are
+        # skipped too
+        self.skip_dirs = {
+            "node_modules", "venv", "env", "__pycache__", "build", "dist",
+            "target", "Pods", "DerivedData", "Library", "site-packages",
+        }
+
+        # Size caps in bytes: plain text/code files are read fully into memory,
+        # so they get a tighter cap than PDFs/Word docs/images
+        self.max_text_bytes = 5 * 1024 * 1024
+        self.max_binary_bytes = 50 * 1024 * 1024
+        self.binary_types = (".pdf", ".docx", ".png", ".jpg", ".jpeg")
 
     # Finds, parses, chunks, embeds, and stores every target file in a folder
     def process_folder(self, folder_path: Path) -> list[Path]:
@@ -36,19 +50,40 @@ class Indexer:
         try:
             for file_path in target_files:
                 self.process_file(file_path)
+
+            # Each insert commits a new LanceDB fragment, so merge them once per run
+            self.db.OptimizeTables()
         finally:
             self.parser.StopProcessing()
 
         return target_files
 
-    # Builds out a list of files matching target file types
+    # Builds out a list of files matching target file types, skipping
+    # dependency/build/hidden directories and files over the size caps
     def find_target_files(self, folder_path: Path) -> list[Path]:
         target_files = []
 
         for root, dirs, files in folder_path.walk(top_down=True):
+            # Pruning dirs in place stops the walk from descending into them
+            dirs[:] = [d for d in dirs if d not in self.skip_dirs and not d.startswith(".")]
+
             for file in files:
-                if file.endswith(self.target_types):
-                    target_files.append(Path(f"{str(root)}/{file}"))
+                if not file.endswith(self.target_types):
+                    continue
+
+                path = root / file
+                try:
+                    size = path.stat().st_size
+                except OSError:
+                    # Broken symlink or unreadable file
+                    continue
+
+                maxBytes = self.max_binary_bytes if file.endswith(self.binary_types) else self.max_text_bytes
+                if size > maxBytes:
+                    print(f"skipping {path}: {size} bytes is over the size cap")
+                    continue
+
+                target_files.append(path)
 
         return target_files
 

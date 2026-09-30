@@ -1,21 +1,63 @@
+import json
+from pathlib import Path
 import lancedb as lance
 import pyarrow as pa
 from classes import File, Vector, FileType
 from embedder import Embedder
 
+# Remembers where the user chose to keep their data, so the backend can
+# reconnect on its own after a restart
+CONFIG_PATH = Path.home() / "Library" / "Application Support" / "Sift" / "config.json"
+
+# Raised when something needs the database before the user has picked where to store it
+class DatabaseNotConfigured(Exception):
+    pass
+
 class DBService():
 
     def __init__(self):
-        self.db = None
+        self._db = None
         self.uri = None
-        self.EstablishDatabase()
-        self.InitializeDatabase()
         self.embedder = Embedder()
 
-    def EstablishDatabase(self):
-        # Connect to local directory for database
-        self.uri = "/users/hutch/desktop/example_lancedb"
-        self.db = lance.connect(self.uri)
+        savedLocation = self.LoadSavedLocation()
+        if savedLocation:
+            try:
+                self.EstablishDatabase(savedLocation)
+            except Exception as e:
+                print(f"Couldn't reopen database at {savedLocation}: {e}")
+
+    @property
+    def db(self):
+        if self._db is None:
+            raise DatabaseNotConfigured("No data location has been chosen yet")
+        return self._db
+
+    @property
+    def isConfigured(self) -> bool:
+        return self._db is not None
+
+    # Connects to (creating if needed) the LanceDB database in the given folder
+    def EstablishDatabase(self, location: str):
+        path = Path(location).expanduser()
+        path.mkdir(parents=True, exist_ok=True)
+
+        self._db = lance.connect(str(path))
+        self.uri = str(path)
+        self.InitializeDatabase()
+
+    # Switches to the data folder the user picked and remembers it for next launch
+    def SetLocation(self, location: str):
+        self.EstablishDatabase(location)
+
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG_PATH.write_text(json.dumps({"databaseLocation": self.uri}))
+
+    def LoadSavedLocation(self) -> str | None:
+        try:
+            return json.loads(CONFIG_PATH.read_text()).get("databaseLocation")
+        except (OSError, ValueError):
+            return None
 
     def InitializeDatabase(self):
         # Create the vector schema
@@ -50,14 +92,22 @@ class DBService():
     
     # Inserts vectors into the DB from a file object
     def InsertVectors(self, file: File):
+        if not file.vectors:
+            return
+
+        # One add per file: every add commits a new version/fragment in LanceDB
         table = self.db.open_table("sift-vectors")
-        for vector in file.vectors:
-            table.add([vector.FormattedVector()])
+        table.add([vector.FormattedVector() for vector in file.vectors])
 
     # Inserts metadata into the DB from a file object
     def InsertMetadata(self, file: File):
         table = self.db.open_table("sift-metadata")
         table.add([file.FormattedMetadata()])
+
+    # Compacts the small fragments left behind by many inserts
+    def OptimizeTables(self):
+        for name in ("sift-vectors", "sift-metadata"):
+            self.db.open_table(name).optimize()
 
     # Returns general info on the database's current state
     def GetInfo(self):

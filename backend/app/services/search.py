@@ -7,7 +7,6 @@ class Searcher:
         self.db = db
         self.summarizer = summarizer
         self.ranker = ranker
-        db.InitializeDatabase()
 
     def searchWithQuery(self, query: str):
         self.db.GetInfo()

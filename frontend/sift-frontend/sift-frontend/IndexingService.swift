@@ -10,10 +10,13 @@ import Foundation
 
 enum IndexingError: LocalizedError {
     case badStatus(Int)
+    /// The backend rejected the request and said why (FastAPI's `detail`).
+    case rejected(String)
 
     var errorDescription: String? {
         switch self {
         case .badStatus(let code): "Sift backend returned HTTP \(code)"
+        case .rejected(let detail): detail
         }
     }
 }
@@ -83,6 +86,24 @@ struct IndexingService {
             throw IndexingError.badStatus(http.statusCode)
         }
         return try JSONDecoder().decode([IndexedFile].self, from: data)
+    }
+
+    // Points the backend's LanceDB at `path`, the folder the user chose to
+    // keep Sift's data in. The backend creates the folder and tables if needed.
+    func setDataLocation(_ path: String) async throws {
+        var request = URLRequest(url: baseURL.appending(path: "database/location"))
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["path": path])
+
+        let (data, response) = try await session.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            struct Detail: Decodable { let detail: String }
+            if let detail = try? JSONDecoder().decode(Detail.self, from: data) {
+                throw IndexingError.rejected(detail.detail)
+            }
+            throw IndexingError.badStatus(http.statusCode)
+        }
     }
 
     // Wipes all indexed vectors and metadata from LanceDB.

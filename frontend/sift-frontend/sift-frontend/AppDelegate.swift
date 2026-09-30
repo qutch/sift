@@ -7,6 +7,7 @@ import AppKit
 import Carbon.HIToolbox
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    let dataLocation = DataLocationStore()
     let folders = FolderStore()
     let indexingStatus = IndexingStatusMonitor()
     private(set) var panel: SearchPanelController?
@@ -18,18 +19,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
 
         indexingStatus.start()
+        dataLocation.syncWithBackend()
 
-        let settings = SettingsWindowController(folders: folders)
+        let settings = SettingsWindowController(folders: folders, dataLocation: dataLocation)
         self.settings = settings
 
-        let panel = SearchPanelController(folders: folders, indexingStatus: indexingStatus, onOpenSettings: { settings.show() })
+        let panel = SearchPanelController(folders: folders, dataLocation: dataLocation,
+                                          indexingStatus: indexingStatus, onOpenSettings: { settings.show() })
         self.panel = panel
 
         // First launch (or every saved folder is gone): show the panel so the
-        // user sees the prompt to choose a folder. Deferred until launch
-        // finishes, otherwise the panel loses key during app activation and
-        // immediately hides itself.
-        if !folders.hasFolders {
+        // user sees the prompts to choose a data folder and folders to search.
+        // Deferred until launch finishes, otherwise the panel loses key during
+        // app activation and immediately hides itself.
+        if !dataLocation.hasLocation || !folders.hasFolders {
             DispatchQueue.main.async { panel.show() }
         }
 

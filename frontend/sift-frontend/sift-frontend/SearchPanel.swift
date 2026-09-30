@@ -39,14 +39,17 @@ final class SearchPanelController: NSObject, NSWindowDelegate {
     private let panel: SearchPanel
     private let model = SearchModel(service: APISearchService())
     private let folders: FolderStore
+    private let dataLocation: DataLocationStore
     private let indexingStatus: IndexingStatusMonitor
     private let onOpenSettings: () -> Void
     // The open panel takes key focus while it's up; don't treat that as
     // clicking away from the search panel.
     private var isChoosingFolders = false
 
-    init(folders: FolderStore, indexingStatus: IndexingStatusMonitor, onOpenSettings: @escaping () -> Void) {
+    init(folders: FolderStore, dataLocation: DataLocationStore, indexingStatus: IndexingStatusMonitor,
+         onOpenSettings: @escaping () -> Void) {
         self.folders = folders
+        self.dataLocation = dataLocation
         self.indexingStatus = indexingStatus
         self.onOpenSettings = onOpenSettings
         panel = SearchPanel(contentRect: NSRect(origin: .zero, size: Self.size))
@@ -55,8 +58,10 @@ final class SearchPanelController: NSObject, NSWindowDelegate {
 
         let view = SearchView(model: model,
                               folders: folders,
+                              dataLocation: dataLocation,
                               indexingStatus: indexingStatus,
                               onDismiss: { [weak self] in self?.hide() },
+                              onChooseDataLocation: { [weak self] in self?.chooseDataLocation() },
                               onChooseFolders: { [weak self] in self?.chooseFolders() },
                               onOpenSettings: { [weak self] in self?.openSettings() })
         let hosting = NSHostingView(rootView: view)
@@ -94,6 +99,16 @@ final class SearchPanelController: NSObject, NSWindowDelegate {
         isChoosingFolders = false
         model.reset()
         panel.makeKeyAndOrderFront(nil)
+    }
+
+    private func chooseDataLocation() {
+        isChoosingFolders = true
+        let path = dataLocation.pickFolder()
+        isChoosingFolders = false
+        panel.makeKeyAndOrderFront(nil)
+
+        guard let path else { return }
+        Task { await dataLocation.setLocation(path) }
     }
 
     private func openSettings() {

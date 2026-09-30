@@ -8,6 +8,7 @@ import SwiftUI
 
 struct SettingsView: View {
     let folders: FolderStore
+    let dataLocation: DataLocationStore
     let indexingService: IndexingService
 
     @State private var selection: AccessibleFolder.ID?
@@ -20,8 +21,9 @@ struct SettingsView: View {
 
     @State private var showingFilesSheet = false
 
-    init(folders: FolderStore, indexingService: IndexingService = IndexingService()) {
+    init(folders: FolderStore, dataLocation: DataLocationStore, indexingService: IndexingService = IndexingService()) {
         self.folders = folders
+        self.dataLocation = dataLocation
         self.indexingService = indexingService
     }
 
@@ -75,6 +77,29 @@ struct SettingsView: View {
 
             Divider()
 
+            Text("Data Location")
+                .font(.headline)
+            HStack {
+                Text(dataLocation.path ?? "Not chosen yet")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                Button("Change…") {
+                    guard let path = dataLocation.pickFolder() else { return }
+                    Task { await dataLocation.setLocation(path) }
+                }
+                // The backend refuses to switch databases mid-index anyway
+                .disabled(status?.isProcessing ?? false)
+            }
+            if let error = dataLocation.lastError {
+                Text(error)
+                    .foregroundStyle(.red)
+                    .font(.caption)
+            }
+
+            Divider()
+
             Text("Maintenance")
                 .font(.headline)
 
@@ -98,7 +123,7 @@ struct SettingsView: View {
             }
         }
         .padding(20)
-        .frame(width: 480, height: 420)
+        .frame(width: 480, height: 500)
         .task {
             while !Task.isCancelled {
                 await refreshStatus()
@@ -205,15 +230,17 @@ private struct ProcessedFilesView: View {
 /// opened reliably from the menu bar and the search panel in an accessory app.
 final class SettingsWindowController {
     private let folders: FolderStore
+    private let dataLocation: DataLocationStore
     private var window: NSWindow?
 
-    init(folders: FolderStore) {
+    init(folders: FolderStore, dataLocation: DataLocationStore) {
         self.folders = folders
+        self.dataLocation = dataLocation
     }
 
     func show() {
         if window == nil {
-            let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(folders: folders)))
+            let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(folders: folders, dataLocation: dataLocation)))
             window.title = "Sift Settings"
             window.styleMask = [.titled, .closable]
             window.isReleasedWhenClosed = false
@@ -226,5 +253,5 @@ final class SettingsWindowController {
 }
 
 #Preview {
-    SettingsView(folders: FolderStore())
+    SettingsView(folders: FolderStore(), dataLocation: DataLocationStore())
 }

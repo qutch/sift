@@ -12,8 +12,10 @@ import UniformTypeIdentifiers
 struct SearchView: View {
     @Bindable var model: SearchModel
     let folders: FolderStore
+    let dataLocation: DataLocationStore
     var indexingStatus: IndexingStatusMonitor?
     var onDismiss: () -> Void = {}
+    var onChooseDataLocation: () -> Void = {}
     var onChooseFolders: () -> Void = {}
     var onOpenSettings: () -> Void = {}
     @FocusState private var fieldFocused: Bool
@@ -22,7 +24,9 @@ struct SearchView: View {
         VStack(spacing: 0) {
             searchBar
             Divider()
-            if folders.hasFolders {
+            if !dataLocation.hasLocation {
+                dataLocationPrompt
+            } else if folders.hasFolders {
                 fileList
             } else {
                 getStartedPrompt
@@ -49,7 +53,7 @@ struct SearchView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 20))
                 .focused($fieldFocused)
-                .disabled(!folders.hasFolders)
+                .disabled(!dataLocation.hasLocation || !folders.hasFolders)
                 .onKeyPress(.downArrow) { model.moveSelection(by: 1); return .handled }
                 .onKeyPress(.upArrow) { model.moveSelection(by: -1); return .handled }
                 .onSubmit {
@@ -104,6 +108,33 @@ struct SearchView: View {
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    // The first step on first launch: where the backend should keep its
+    // LanceDB database. Nothing can be indexed until this is set.
+    private var dataLocationPrompt: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "externaldrive.badge.plus")
+                .font(.system(size: 40))
+                .foregroundStyle(.secondary)
+            Text("Choose where to store Sift's data")
+                .font(.title3.weight(.semibold))
+            Text("Sift keeps its search index in a folder on your Mac. Nothing leaves your computer. You can change this later in Settings.")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 360)
+            Button("Choose Data Folder…", action: onChooseDataLocation)
+                .keyboardShortcut(.defaultAction)
+                .controlSize(.large)
+            if let error = dataLocation.lastError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 360)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // Shown instead of results until the user has given Sift at least one folder.
@@ -161,5 +192,5 @@ private struct FileRow: View {
 }
 
 #Preview {
-    SearchView(model: SearchModel(service: MockSearchService()), folders: FolderStore())
+    SearchView(model: SearchModel(service: MockSearchService()), folders: FolderStore(), dataLocation: DataLocationStore())
 }

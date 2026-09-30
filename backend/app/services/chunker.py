@@ -39,7 +39,8 @@ class Chunker:
                 if curChar not in allowedChunkEndings:
                     # Find the next allowed chunk ending character
                     charIndex = currentIndex + 1
-                    while curChar not in allowedChunkEndings:
+                    # Stop at the end of the text if no boundary character is left
+                    while charIndex < textLength and curChar not in allowedChunkEndings:
                         curChar = text[charIndex]
                         charIndex += 1
 

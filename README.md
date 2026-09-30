@@ -191,15 +191,17 @@ cd backend
 uv sync
 ```
 
-### 3. Configure paths
+### 3. Choose a data location
 
-The database location is currently hardcoded in `backend/app/services/databaseService.py`, inside `EstablishDatabase()`, to `/users/hutch/desktop/example_lancedb`. Change `self.uri` to a directory on your machine before running, for example:
+You don't need to configure anything here. The first time you open the app, it asks you to pick a folder for Sift's data, and the backend creates its LanceDB database there. You can change the folder later in Settings. The backend saves your choice to `~/Library/Application Support/Sift/config.json` and reconnects to it on restart. Until a location is set, the endpoints that need the database return HTTP 409.
 
-```python
-self.uri = "/Users/<your-username>/sift-data/lancedb"
+If you're using the API without the app, set the location directly:
+
+```bash
+curl -X PUT http://127.0.0.1:8000/database/location \
+  -H 'Content-Type: application/json' \
+  -d '{"path": "/Users/<your-username>/sift-data"}'
 ```
-
-LanceDB creates the directory the first time it runs.
 
 ### 4. Run the API
 
@@ -266,7 +268,8 @@ Example response from `/search?q=data structures`:
 
 ### Backend cleanup and fixes
 - [ ] Replace the `sys.path` workaround in `app.py` with proper package imports in `services/`.
-- [ ] Move hardcoded paths (the DB location) and model names into a config file or environment variables.
+- [x] Let the user choose the DB location (asked on first launch, changeable in Settings).
+- [ ] Move model names into a config file or environment variables.
 - [ ] Decide whether to use `ChunkSummarizer` (per-chunk keyword extraction) in the pipeline, or remove it.
 - [ ] Replace `print` debugging with proper logging, and add error handling around Ollama calls.
 
