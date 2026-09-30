@@ -61,8 +61,9 @@ struct SearchView: View {
                     onDismiss()
                     model.openSelectedFile(query: (file.path as NSString).expandingTildeInPath)
                 }
-            if model.isSearching {
+            if model.isSearching || model.isSummarizing {
                 ProgressView().controlSize(.small)
+                    .help(model.isSummarizing ? "Summarizing results…" : "Searching…")
             }
             Button(action: onOpenSettings) {
                 Image(systemName: "gearshape")
@@ -77,11 +78,25 @@ struct SearchView: View {
 
     private var fileList: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(model.isShowingRecents ? "Recent Files" : "Results")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
+            HStack(spacing: 4) {
+                Text(model.isShowingRecents ? "Recent Files" : "Results")
+                if model.isSummarizing && !model.isShowingRecents {
+                    Text("· summarizing…")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+
+            if let summary = model.summary, !model.isShowingRecents {
+                Text(summary)
+                    .font(.callout)
+                    .lineLimit(3)
+                    .help(summary)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 4)
+            }
 
             if model.visibleFiles.isEmpty {
                 Text(model.isShowingRecents || model.isSearching ? "" : "No matching files")

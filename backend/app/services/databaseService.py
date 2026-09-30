@@ -118,14 +118,18 @@ class DBService():
         print("metadata:", meta_table.count_rows())
 
     # Returns metadata rows for the given file paths, keyed by filePath.
-    # Used to enrich ranking/summarization with each file's summary
-    # instead of just its raw chunk text.
+    # Used to show each search result's stored summary.
     def GetMetadataForFiles(self, filePaths: list[str]) -> dict[str, dict]:
-        meta_table = self.db.open_table("sift-metadata")
-        rows = meta_table.to_arrow().to_pylist()
-        filePaths = set(filePaths)
+        if not filePaths:
+            return {}
 
-        return {row['filePath']: row for row in rows if row['filePath'] in filePaths}
+        meta_table = self.db.open_table("sift-metadata")
+        # Filter inside LanceDB rather than loading the whole table, since
+        # this runs on every search. SQL strings escape ' by doubling it
+        quoted = ", ".join("'" + path.replace("'", "''") + "'" for path in filePaths)
+        rows = meta_table.search().where(f"filePath IN ({quoted})").limit(len(filePaths) * 2).to_list()
+
+        return {row['filePath']: row for row in rows}
 
     # Returns metadata for every indexed file, used to back the frontend's
     # "processed files" list
@@ -139,12 +143,10 @@ class DBService():
         self.db.drop_table("sift-metadata")
         self.InitializeDatabase()
 
-    # Returns chunks related to the query, searched by LanceDB
-    def GetChunks(self, query: str):
+    # Returns the chunks closest to the query, searched by LanceDB
+    def GetChunks(self, query: str, limit: int = 5):
         vec_table = self.db.open_table("sift-vectors")
-        meta_table = self.db.open_table("sift-metadata")
 
         embeddedQuery = self.embedder.EmbedChunk(query).embeddings[0]
 
-        results = vec_table.search(embeddedQuery).limit(5).to_list()
-        return results
+        return vec_table.search(embeddedQuery).limit(limit).to_list()

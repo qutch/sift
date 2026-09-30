@@ -2,7 +2,7 @@
 
 **Search your files by what they mean, not just what they're named. Everything runs on your own machine.**
 
-Sift is a local semantic file search tool for macOS. Point it at a folder and it reads your documents, notes, PDFs, and code, then builds a vector index using AI models that run locally. When you search, Sift finds the files whose *content* matches what you asked for, ranks them by relevance, and writes a short summary of what it found. It works like Spotlight, but it understands what your files are about.
+Sift is a local semantic file search tool for macOS. Point it at a folder and it reads your documents, notes, PDFs, and code, then builds a vector index using AI models that run locally. When you search, Sift finds the files whose *content* matches what you asked for and writes a short summary of what it found. It works like Spotlight, but it understands what your files are about.
 
 Nothing leaves your computer. There are no cloud APIs, no accounts, and no telemetry. All models run through [Ollama](https://ollama.com), and the index is stored in a local [LanceDB](https://lancedb.com) database.
 
@@ -25,11 +25,11 @@ Nothing leaves your computer. There are no cloud APIs, no accounts, and no telem
 ## Features
 
 - **Semantic search:** finds files by meaning. For example, "notes about sorting algorithms" can match a file that never uses the word "sorting".
-- **Fully local and private:** embedding, summarizing, and ranking all run on local models through Ollama.
+- **Fully local and private:** embedding and summarizing both run on local models through Ollama.
 - **Multi-format parsing:** handles plain text (`.txt`, `.md`), source code and config files (`.py`, `.java`, `.c`, `.cpp`, `.json`, `.xml`, `.env`, `.toml`), and PDFs.
 - **Smart PDF handling:** detects scanned or complex pages and uses OCR only when needed. Simple PDFs go through a faster text parser.
 - **AI file summaries:** each indexed file gets a one-sentence, keyword-rich summary.
-- **LLM re-ranking:** results from the vector search are re-scored from 1 to 10 by a local LLM, using structured JSON output. Each score comes with a short reason.
+- **Instant results:** files from the vector search appear right away, and the LLM summary follows when it's ready.
 - **Search summaries:** each search returns a natural-language summary of the matching content.
 - **Spotlight-style macOS app:** a menu bar app with a global hotkey (<kbd>⌥ Option</kbd> + <kbd>Space</kbd>) that opens a floating search panel with keyboard navigation.
 - **Folder access controls:** Sift can only see folders you choose. On first launch the search panel asks you to pick a folder, and you can manage the list later in Settings. Adding a folder starts indexing it right away.
@@ -66,22 +66,21 @@ Nothing leaves your computer. There are no cloud APIs, no accounts, and no telem
 ### Search pipeline
 
 ```
- Query ──▶ embed query ──▶ LanceDB vector search (top 5 chunks)
+ Query ──▶ embed query ──▶ LanceDB vector search (top 20 chunks → top n files)
                                      │
-                     ┌───────────────┴───────────────┐
-                     ▼                               ▼
-          Summarizer (gemma3:1b)            Ranker (gemma3:1b)  
-          summary of the matches            score each file 1–10
-                     │                    (with file summaries as context)
-                     └───────────────┬───────────────┘
+                                     ├──▶ ① results: files + their stored summaries   (<1s)
                                      ▼
-                     { "summary": ..., "ranking": [...] }
+                         Summarizer (gemma3:1b)
+                        summary of the matches
+                                     └──▶ ② summary                                   (~5–10s)
 ```
 
-`Searcher.SearchAndRank()` (`search.py`) embeds the query, pulls the closest chunks from LanceDB, and then does two things with them:
+`Searcher.Search()` (`search.py`) is a generator, and `/search` streams each stage as a line of JSON as soon as it's ready. The app shows the vector-search results right away and adds the summary when it arrives.
 
-- Summarizes the matched content in relation to the query.
-- Groups the chunks by file, adds each file's stored summary, and has the Ranker score every file. The ranker uses a Pydantic schema to force structured output, which keeps small local models reliable.
+- **Results:** the files with the closest chunks, in vector-distance order, each with the one-line summary generated at index time.
+- **Summary:** a summary of the top matched chunks in relation to the query.
+
+The summary starts as soon as the results are sent, so it still runs to completion if the client disconnects.
 
 ### Database schema
 
@@ -105,14 +104,14 @@ Nothing leaves your computer. There are no cloud APIs, no accounts, and no telem
 | **[LanceDB](https://lancedb.com)** + PyArrow | Embedded vector database |
 | **[LiteParse](https://pypi.org/project/liteparse/)** | PDF parsing with optional OCR |
 | **PyMuPDF / pymupdf4llm** | PDF tooling |
-| **Pydantic** | Structured LLM output for ranking |
+| **Pydantic** | API request validation |
 
 ### Models (via Ollama)
 
 | Model | Role |
 |-------|------|
 | `qwen3-embedding:0.6b` | Chunk and query embeddings (1024 dims) |
-| `gemma3:1b` | The single chat model for everything else: file summaries, search-result summaries, and relevance ranking |
+| `gemma3:1b` | The single chat model for everything else: file summaries and search-result summaries |
 
 Sift intentionally uses only two models, so Ollama keeps at most two resident in memory. The chat model is set in one place, `CHAT_MODEL` in `llamaService.py`.
 
@@ -143,8 +142,8 @@ sift/
 │           ├── chunker.py        # Text cleaning + overlapping chunking
 │           ├── embedder.py       # Ollama embeddings → Vector objects
 │           ├── databaseService.py# LanceDB tables, inserts, vector search, clear
-│           ├── llamaService.py   # Summarizer, Ranker, ChunkSummarizer
-│           ├── search.py         # Searcher: search → summarize → rank
+│           ├── llamaService.py   # Summarizer, ChunkSummarizer
+│           ├── search.py         # Searcher: vector search → summarize
 │           ├── watcher.py        # (planned) filesystem watcher
 │           └── classes/
 │               ├── File.py       # Parsed file + metadata + chunks/vectors
@@ -223,23 +222,19 @@ Start the API first, then open `frontend/sift-frontend/sift-frontend.xcodeproj` 
 | Method | Route | Description |
 |--------|-------|-------------|
 | `GET` | `/` | Health check |
-| `GET` | `/search?q={query}&numFiles={n}` | Semantic search. Returns a summary and up to `n` ranked files (default 5) |
+| `GET` | `/search?q={query}&numFiles={n}` | Semantic search over up to `n` files (default 5). Streams NDJSON: `results`, then `summary` |
+| `GET` / `PUT` | `/database/location` | Where LanceDB stores its data. `PUT` takes `{"path": ...}` |
 | `GET` | `/file/{file_path}` | Returns stored metadata for an indexed file, or a 404 if it isn't indexed |
 | `POST` | `/process/{folder_path}` | Indexes a folder and its sub-folders. The request stays open until indexing finishes |
 | `GET` | `/status` | Indexing progress: `isProcessing`, `filesParsed`, `totalFiles`, `currentFile` |
 | `GET` | `/files` | Metadata for every indexed file |
 | `DELETE` | `/database` | Wipes all indexed vectors and metadata |
 
-Example response from `/search?q=data structures`:
+Example response from `/search?q=data structures` (one JSON object per line):
 
 ```json
-{
-  "summary": "Your notes cover linked lists, trees, and Big-O analysis...",
-  "ranking": [
-    { "filePath": "/Users/you/notes/dsa.md", "relevance": 9, "reason": "Directly covers data structures." },
-    { "filePath": "/Users/you/notes/cs-midterm.pdf", "relevance": 6, "reason": "Mentions trees and graphs." }
-  ]
-}
+{"type": "results", "files": [{"filePath": "/Users/you/notes/cs-midterm.pdf", "fileName": "cs-midterm.pdf", "summary": "Midterm review covering trees and graphs."}, {"filePath": "/Users/you/notes/dsa.md", "fileName": "dsa.md", "summary": "Notes on linked lists and Big-O."}]}
+{"type": "summary", "summary": "Your notes cover linked lists, trees, and Big-O analysis..."}
 ```
 
 ---
@@ -249,7 +244,8 @@ Example response from `/search?q=data structures`:
 ### Connect the frontend to the backend
 - [x] Replace `MockSearchService` with `APISearchService`, which calls `GET /search`.
 - [x] Show indexing progress in the search panel and Settings, and list processed files.
-- [ ] Show the overall search `summary` in the panel. Each result row currently shows the ranker's `reason`.
+- [x] Show the overall search `summary` in the panel.
+- [ ] Revisit LLM re-ranking. It was removed because gemma3:1b often ranked files worse than plain vector order.
 - [ ] Handle slow searches. Each search takes several seconds, but the panel searches 250 ms after you stop typing. Consider searching only on Return, or returning vector results first.
 - [ ] Add loading, error, and "backend offline" states to the UI.
 - [ ] Load real **Recent Files** with a new backend endpoint (using `lastOpened` metadata). The list is empty for now. The new `/files` endpoint could be a starting point.

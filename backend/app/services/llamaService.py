@@ -1,17 +1,8 @@
 from ollama import chat
-from pydantic import BaseModel, Field
 
-# Single chat model shared by every LLM task (summaries, ranking, keywords),
+# Single chat model shared by every LLM task (summaries, keywords),
 # so Ollama only keeps this plus the embedding model resident in memory
 CHAT_MODEL = 'gemma3:1b'
-
-class FileRelevance(BaseModel):
-    filePath: str
-    relevance: int = Field(ge=1, le=10)
-    reason: str
-
-class RankingResult(BaseModel):
-    rankings: list[FileRelevance]
 
 class ChunkSummarizer:
 
@@ -96,83 +87,3 @@ class Summarizer:
         )
 
         return response.message.content
-
-class Ranker:
-    def __init__(self):
-        # Uses the shared chat model rather than a larger dedicated one to
-        # avoid loading a third model; the forced JSON schema in RankFiles
-        # is what keeps a 1b model's rankings reliable
-        self.model = CHAT_MODEL
-        self.rankingPrompt = """You are a file relevance ranker. You will be given a user's
-                            search query and a numbered list of files, each with a
-                            snippet of its content. Score EVERY file listed, exactly
-                            once, from 1 (irrelevant) to 10 (highly relevant) based on
-                            how well its content relates to the query."""
-
-    # Chunks come back from the vector search grouped by chunk, not by file,
-    # so multiple chunks can share the same filePath. Join them into one
-    # block of text per file and cap the length so the prompt stays inside
-    # the local model's context window.
-    def _groupChunksByFile(self, chunks: list[dict], maxCharsPerFile: int = 800) -> dict[str, str]:
-        grouped: dict[str, list[str]] = {}
-        for chunk in chunks:
-            filePath = chunk.get('filePath')
-            grouped.setdefault(filePath, []).append(chunk.get('chunkText', ''))
-
-        return {
-            filePath: ' '.join(texts)[:maxCharsPerFile]
-            for filePath, texts in grouped.items()
-        }
-
-    # Ranks the files that produced the given chunks by relevance to the query.
-    # metadata, keyed by filePath (e.g. from DBService.GetMetadataForFiles),
-    # optionally supplies a summary so the model has more than a raw chunk to
-    # go on. Returns a list of {filePath, relevance, reason} dicts, most
-    # relevant first.
-    def RankFiles(self, query: str, chunks: list[dict], metadata: dict[str, dict] | None = None, topK: int | None = None) -> list[dict]:
-        fileTexts = self._groupChunksByFile(chunks)
-        if not fileTexts:
-            return []
-
-        metadata = metadata or {}
-        entries = []
-        for i, (path, text) in enumerate(fileTexts.items()):
-            summary = metadata.get(path, {}).get('summary')
-            summaryLine = f"\n   summary: {summary}" if summary else ""
-            entries.append(f"{i + 1}. filePath: {path}{summaryLine}\n   content: {text}")
-
-        fileList = "\n".join(entries)
-        userPrompt = f"Query: {query}\n\nFiles:\n{fileList}"
-
-        response = chat(
-            model=self.model,
-            messages=[
-                {'role': 'system', 'content': self.rankingPrompt},
-                {'role': 'user', 'content': userPrompt},
-            ],
-            # Structured output is what makes this reliable with a small
-            # local model - without a forced schema, gemma/llama 1b-3b
-            # models drift from free-form ranking instructions
-            format=RankingResult.model_json_schema(),
-        )
-
-        try:
-            result = RankingResult.model_validate_json(response.message.content)
-        except ValueError as e:
-            print(f"Ranker: failed to parse model output ({e}); returning unranked files")
-            return [{'filePath': path, 'relevance': None, 'reason': None} for path in fileTexts]
-
-        ranked = sorted(result.rankings, key=lambda r: r.relevance, reverse=True)
-
-        # Small models sometimes score the same file more than once or invent
-        # paths, so keep only the highest score for each real candidate file
-        seen = set()
-        ranked = [r for r in ranked
-                if r.filePath in fileTexts and not (r.filePath in seen or seen.add(r.filePath))]
-        if not ranked:
-            return [{'filePath': path, 'relevance': None, 'reason': None} for path in fileTexts]
-
-        if topK is not None:
-            ranked = ranked[:topK]
-
-        return [r.model_dump() for r in ranked]

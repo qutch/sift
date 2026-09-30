@@ -16,9 +16,16 @@ struct FileResult: Identifiable, Hashable {
     var directory: String { (path as NSString).deletingLastPathComponent }
 }
 
+/// Searches arrive in stages: quick vector results first, then the slower
+/// LLM summary once it finishes.
+enum SearchUpdate {
+    case results([FileResult])
+    case summary(String)
+}
+
 protocol SearchService {
     func recentFiles() async -> [FileResult]
-    func search(_ query: String) async throws -> [FileResult]
+    func search(_ query: String) -> AsyncThrowingStream<SearchUpdate, Error>
 }
 
 @Observable
@@ -28,7 +35,12 @@ final class SearchModel {
     }
     private(set) var results: [FileResult] = []
     private(set) var recents: [FileResult] = []
+    /// True until the first (vector search) results arrive.
     private(set) var isSearching = false
+    /// True while the summary is still catching up.
+    private(set) var isSummarizing = false
+    /// LLM summary of the results, once it's ready.
+    private(set) var summary: String?
     var selection: FileResult.ID?
     /// Bumped every time the panel is shown so the view can re-focus the field.
     private(set) var focusToken = 0
@@ -47,7 +59,9 @@ final class SearchModel {
         searchTask?.cancel()
         query = ""
         results = []
+        summary = nil
         isSearching = false
+        isSummarizing = false
         focusToken += 1
         Task {
             recents = await service.recentFiles()
@@ -74,10 +88,13 @@ final class SearchModel {
         }
     }
     
-    // Debounced so we don't hit the backend on every keystroke.
+    // Debounced so we don't hit the backend on every keystroke. Cancelling
+    // the previous search also stops it from delivering a stale summary.
     private func scheduleSearch() {
         searchTask?.cancel()
         let q = query.trimmingCharacters(in: .whitespaces)
+        summary = nil
+        isSummarizing = false
         guard !q.isEmpty else {
             results = []
             isSearching = false
@@ -88,11 +105,32 @@ final class SearchModel {
         searchTask = Task {
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
-            let found = (try? await service.search(q)) ?? []
+            do {
+                for try await update in service.search(q) {
+                    guard !Task.isCancelled else { return }
+                    apply(update)
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                // Keep whatever stages already arrived; only a failure before
+                // the first results leaves the list empty.
+                if isSearching { results = [] }
+            }
             guard !Task.isCancelled else { return }
-            results = found
-            selection = found.first?.id
             isSearching = false
+            isSummarizing = false
+        }
+    }
+
+    private func apply(_ update: SearchUpdate) {
+        switch update {
+        case .results(let files):
+            results = files
+            selection = files.first?.id
+            isSearching = false
+            isSummarizing = !files.isEmpty
+        case .summary(let text):
+            summary = text
         }
     }
 }
@@ -113,12 +151,21 @@ struct MockSearchService: SearchService {
         Array(Self.files.prefix(5))
     }
 
-    func search(_ query: String) async throws -> [FileResult] {
-        try await Task.sleep(for: .milliseconds(200))
+    func search(_ query: String) -> AsyncThrowingStream<SearchUpdate, Error> {
         let terms = query.lowercased().split(separator: " ")
-        return Self.files.filter { file in
+        let matches = Self.files.filter { file in
             let haystack = (file.path + " " + (file.summary ?? "")).lowercased()
             return terms.contains { haystack.contains($0) }
+        }
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                try await Task.sleep(for: .milliseconds(200))
+                continuation.yield(.results(matches))
+                try await Task.sleep(for: .seconds(1))
+                continuation.yield(.summary("\(matches.count) files mention \(query)."))
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 }

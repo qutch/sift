@@ -1,3 +1,4 @@
+import json
 import queue
 import sys
 import threading
@@ -8,11 +9,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "services"))
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from services.search import Searcher
 from services.databaseService import DBService, DatabaseNotConfigured
-from services.llamaService import Summarizer, Ranker
+from services.llamaService import Summarizer
 from services.indexer import Indexer
 from services.fileParser import Parser
 from services.chunker import Chunker
@@ -21,8 +22,7 @@ from services.embedder import Embedder
 app = FastAPI()
 db = DBService()
 summarizer = Summarizer()
-ranker = Ranker()
-searcher = Searcher(db, summarizer, ranker)
+searcher = Searcher(db, summarizer)
 parser = Parser()
 chunker = Chunker()
 embedder = Embedder()
@@ -58,11 +58,25 @@ def set_database_location(location: DatabaseLocation) -> dict:
         raise HTTPException(status_code=400, detail=f"Can't use {location.path}: {e}")
     return {"path": db.uri}
 
-# Basic search with a query, e.g. /search?q=data structures
-# (a query param rather than a path segment so queries can contain '/')
+# Search with a query, e.g. /search?q=data structures
+# (a query param rather than a path segment so queries can contain '/').
+# Streams newline-delimited JSON, one line per stage (see Searcher.Search), so
+# vector results reach the user right away while the LLM summary catches up.
+# The summary starts as soon as the results are sent, so it still runs to
+# completion if the client disconnects (e.g. the user kept typing)
 @app.get("/search")
 def search(q: str = Query(min_length=1), numFiles: int = 5):
-    return searcher.SearchAndRank(q, numFiles)
+    # Run the vector search before streaming starts, so a missing database
+    # still comes back as a proper 409 rather than a broken stream
+    stages = searcher.Search(q, numFiles)
+    first = next(stages)
+
+    def lines():
+        yield json.dumps(first, default=str) + "\n"
+        for stage in stages:
+            yield json.dumps(stage, default=str) + "\n"
+
+    return StreamingResponse(lines(), media_type="application/x-ndjson")
 
 # Grab a single file's metadata
 @app.get("/file/{file_path:path}")
