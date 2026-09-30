@@ -6,7 +6,7 @@ Sift is a local semantic file search tool for macOS. Point it at a folder and it
 
 Nothing leaves your computer. There are no cloud APIs, no accounts, and no telemetry. All models run through [Ollama](https://ollama.com), and the index is stored in a local [LanceDB](https://lancedb.com) database.
 
-> **Status:** Early development. The backend indexing and search pipeline works end to end, and the macOS app sends its searches to the backend API. There's no way to start indexing from the app or API yet. See [Roadmap](#roadmap--whats-next).
+> **Status:** Early development. The backend indexing and search pipeline works end to end, and the macOS app is wired to it. Choosing a folder in the app starts indexing through the API, a status indicator shows progress, and searches go to the backend. Indexing only runs when you add a folder, so there's no automatic re-indexing yet. See [Roadmap](#roadmap--whats-next).
 
 ---
 
@@ -32,7 +32,9 @@ Nothing leaves your computer. There are no cloud APIs, no accounts, and no telem
 - **LLM re-ranking:** results from the vector search are re-scored from 1 to 10 by a local LLM, using structured JSON output. Each score comes with a short reason.
 - **Search summaries:** each search returns a natural-language summary of the matching content.
 - **Spotlight-style macOS app:** a menu bar app with a global hotkey (<kbd>⌥ Option</kbd> + <kbd>Space</kbd>) that opens a floating search panel with keyboard navigation.
-- **Folder access controls:** Sift can only see folders you choose. On first launch the search panel asks you to pick a folder, and you can manage the list later in Settings.
+- **Folder access controls:** Sift can only see folders you choose. On first launch the search panel asks you to pick a folder, and you can manage the list later in Settings. Adding a folder starts indexing it right away.
+- **Live indexing status:** the search panel shows a dot and the file being processed (gray when idle, orange while indexing), and Settings shows a progress count (`parsed/total`).
+- **Index management:** Settings can list every processed file and wipe the whole index and folder list with "Clear All Data".
 
 ---
 
@@ -55,8 +57,8 @@ Nothing leaves your computer. There are no cloud APIs, no accounts, and no telem
               Summarizer (gemma3:1b)
 ```
 
-1. **Indexer** (`indexer.py`) walks a folder and collects files that match the target extensions.
-2. **Parser** (`fileParser.py`) extracts text and file metadata (size, created, last edited, last opened), then asks the **Summarizer** for a one-line summary.
+1. **Indexer** (`indexer.py`) walks a folder and its sub-folders and collects files that match the target extensions. It runs each file through the rest of the pipeline and stores the results as it goes.
+2. **Parser** (`fileParser.py`) extracts text and file metadata (size, created, last edited, last opened), then asks the **Summarizer** for a one-line summary. It also tracks progress (files parsed, total, current file), which `/status` reports.
 3. **Chunker** (`chunker.py`) removes escape characters and splits the text into overlapping chunks. Chunk boundaries are extended to the next word or punctuation break so words aren't cut in half.
 4. **Embedder** (`embedder.py`) batch-embeds the chunks with `qwen3-embedding:0.6b`, producing 1024-dimensional vectors.
 5. **DBService** (`databaseService.py`) stores the chunk vectors and the per-file metadata in two LanceDB tables.
@@ -136,11 +138,11 @@ sift/
 │   └── app/
 │       ├── app.py                # FastAPI app & routes
 │       └── services/
-│           ├── indexer.py        # Walks folders, filters by file type
-│           ├── fileParser.py     # Text / code / PDF parsing + metadata
+│           ├── indexer.py        # Walks folders, runs each file through the pipeline
+│           ├── fileParser.py     # Text / code / PDF parsing + metadata + progress status
 │           ├── chunker.py        # Text cleaning + overlapping chunking
 │           ├── embedder.py       # Ollama embeddings → Vector objects
-│           ├── databaseService.py# LanceDB tables, inserts, vector search
+│           ├── databaseService.py# LanceDB tables, inserts, vector search, clear
 │           ├── llamaService.py   # Summarizer, Ranker, ChunkSummarizer
 │           ├── search.py         # Searcher: search → summarize → rank
 │           ├── watcher.py        # (planned) filesystem watcher
@@ -158,8 +160,10 @@ sift/
             ├── ContentView.swift # Search bar + results list UI
             ├── SearchModel.swift # View model, debounced search, mock service
             ├── APISearchService.swift # HTTP client for the FastAPI backend
-            ├── FolderStore.swift # User-chosen folders, saved as security-scoped bookmarks
-            └── SettingsView.swift # Settings window (manage folders)
+            ├── FolderStore.swift # User-chosen folders (security-scoped bookmarks); starts indexing
+            ├── IndexingService.swift # HTTP client for indexing, status, file list, clear
+            ├── IndexingStatusMonitor.swift # Polls /status every second; status indicator view
+            └── SettingsView.swift # Settings window: folders, progress, processed files, clear data
 ```
 
 ---
@@ -189,7 +193,7 @@ uv sync
 
 ### 3. Configure paths
 
-The database location is currently set in `backend/app/services/databaseService.py`, inside `EstablishDatabase()`. Change `self.uri` to a directory on your machine before running, for example:
+The database location is currently hardcoded in `backend/app/services/databaseService.py`, inside `EstablishDatabase()`, to `/users/hutch/desktop/example_lancedb`. Change `self.uri` to a directory on your machine before running, for example:
 
 ```python
 self.uri = "/Users/<your-username>/sift-data/lancedb"
@@ -204,11 +208,11 @@ cd backend/app
 uv run uvicorn app:app --reload
 ```
 
-The API runs at `http://127.0.0.1:8000`, and interactive docs are at `/docs`. Ollama must be running for searches to work. The first search after startup is slow (roughly 20 to 30 seconds) while Ollama loads the models.
+The API runs at `http://127.0.0.1:8000`, and interactive docs are at `/docs`. Ollama must be running for indexing and searches to work. The first search after startup is slow (roughly 20 to 30 seconds) while Ollama loads the models.
 
 ### 5. Run the macOS app
 
-Start the API first, then open `frontend/sift-frontend/sift-frontend.xcodeproj` in Xcode and run it. The app expects the API at `http://127.0.0.1:8000`; you can change this with `baseURL` in `APISearchService.swift`. A magnifying glass icon appears in the menu bar. Press <kbd>⌥ Option</kbd> + <kbd>Space</kbd> to open the search panel. Use <kbd>↑</kbd>/<kbd>↓</kbd> to move between results, <kbd>Return</kbd> to open a file, and <kbd>Esc</kbd> to close the panel.
+Start the API first, then open `frontend/sift-frontend/sift-frontend.xcodeproj` in Xcode and run it. The app expects the API at `http://127.0.0.1:8000`; you can change this with `baseURL` in `APISearchService.swift`. A magnifying glass icon appears in the menu bar. Press <kbd>⌥ Option</kbd> + <kbd>Space</kbd> to open the search panel. On first launch the panel asks you to choose a folder, and Sift starts indexing it. Indexing time depends on how many files there are, since each file gets a summary from the local LLM. Once files are indexed, use <kbd>↑</kbd>/<kbd>↓</kbd> to move between results, <kbd>Return</kbd> to open a file, and <kbd>Esc</kbd> to close the panel.
 
 ---
 
@@ -219,6 +223,10 @@ Start the API first, then open `frontend/sift-frontend/sift-frontend.xcodeproj` 
 | `GET` | `/` | Health check |
 | `GET` | `/search?q={query}&numFiles={n}` | Semantic search. Returns a summary and up to `n` ranked files (default 5) |
 | `GET` | `/file/{file_path}` | Returns stored metadata for an indexed file, or a 404 if it isn't indexed |
+| `POST` | `/process/{folder_path}` | Indexes a folder and its sub-folders. The request stays open until indexing finishes |
+| `GET` | `/status` | Indexing progress: `isProcessing`, `filesParsed`, `totalFiles`, `currentFile` |
+| `GET` | `/files` | Metadata for every indexed file |
+| `DELETE` | `/database` | Wipes all indexed vectors and metadata |
 
 Example response from `/search?q=data structures`:
 
@@ -238,18 +246,21 @@ Example response from `/search?q=data structures`:
 
 ### Connect the frontend to the backend
 - [x] Replace `MockSearchService` with `APISearchService`, which calls `GET /search`.
+- [x] Show indexing progress in the search panel and Settings, and list processed files.
 - [ ] Show the overall search `summary` in the panel. Each result row currently shows the ranker's `reason`.
 - [ ] Handle slow searches. Each search takes several seconds, but the panel searches 250 ms after you stop typing. Consider searching only on Return, or returning vector results first.
 - [ ] Add loading, error, and "backend offline" states to the UI.
-- [ ] Load real **Recent Files** with a new backend endpoint (using `lastOpened` metadata). The list is empty for now.
+- [ ] Load real **Recent Files** with a new backend endpoint (using `lastOpened` metadata). The list is empty for now. The new `/files` endpoint could be a starting point.
 - [ ] Launch and manage the Python backend from the Mac app, or run it as a background service.
 
 ### Indexing
-- [ ] Add a real indexing entry point. The test driver was removed from `indexer.py`, so there's currently no way to trigger indexing. Options are an API route (e.g. `POST /index`) or a CLI command.
+- [x] Add an indexing entry point: `POST /process/{folder_path}`, called by the app when a folder is added.
 - [x] Let users choose which folders Sift can access (Settings window and first-run prompt).
-- [ ] Send the chosen folders to the backend so it indexes them. The backend doesn't know about them yet.
+- [x] Send newly chosen folders to the backend so it indexes them.
+- [ ] Re-send saved folders on launch, and stop removing a folder in Settings from leaving its files in the index. Removing a folder only revokes access, and the index keeps its files.
+- [ ] Make indexing non-blocking. `POST /process` holds the request open until it finishes, and a second request while one is running would share the same progress counters.
 - [ ] Implement `watcher.py` to re-index files automatically when they're created, edited, or deleted.
-- [ ] Skip files that haven't changed, and remove stale vectors and metadata when a file is re-indexed or deleted.
+- [ ] Skip files that haven't changed, and remove stale vectors and metadata when a file is re-indexed or deleted. Adding the same folder again currently inserts duplicate rows.
 - [ ] Add `.docx` support (`ParseWord` is a stub, and `.docx` is currently sent to the PDF parser).
 - [ ] Add image support (`ParseImage` is a stub). This would need OCR or a vision model for captions.
 
@@ -262,7 +273,7 @@ Example response from `/search?q=data structures`:
 ### Search quality and performance
 - [ ] Make the number of results configurable (it's currently fixed at 5 chunks).
 - [ ] Filter searches by file type, date, or folder using the metadata table.
-- [ ] Tune chunk size and overlap (currently 100 characters with 20 overlap).
+- [ ] Tune chunk size and overlap (currently 1000 characters with 100 overlap).
 - [ ] Reduce memory and latency. Ollama inference and keeping several models loaded at once are the main costs.
 
 ### Testing and packaging
