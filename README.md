@@ -195,14 +195,6 @@ uv sync
 
 You don't need to configure anything here. The first time you open the app, it asks you to pick a folder for Sift's data, and the backend creates its LanceDB database there. You can change the folder later in Settings. The backend saves your choice to `~/Library/Application Support/Sift/config.json` and reconnects to it on restart. Until a location is set, the endpoints that need the database return HTTP 409.
 
-If you're using the API without the app, set the location directly:
-
-```bash
-curl -X PUT http://127.0.0.1:8000/database/location \
-  -H 'Content-Type: application/json' \
-  -d '{"path": "/Users/<your-username>/sift-data"}'
-```
-
 ### 4. Run the API
 
 ```bash
@@ -238,44 +230,6 @@ Example response from `/search?q=data structures` (one JSON object per line):
 {"type": "results", "files": [{"filePath": "/Users/you/notes/cs-midterm.pdf", "fileName": "cs-midterm.pdf", "summary": "Midterm review covering trees and graphs."}, {"filePath": "/Users/you/notes/dsa.md", "fileName": "dsa.md", "summary": "Notes on linked lists and Big-O."}]}
 {"type": "summary", "summary": "Your notes cover linked lists, trees, and Big-O analysis..."}
 ```
-
----
-
-## Roadmap / What's Next
-
-### Connect the frontend to the backend
-- [x] Replace `MockSearchService` with `APISearchService`, which calls `GET /search`.
-- [x] Show indexing progress in the search panel and Settings, and list processed files.
-- [x] Show the overall search `summary` in the panel.
-- [ ] Revisit LLM re-ranking. It was removed because gemma3:1b often ranked files worse than plain vector order.
-- [ ] Handle slow searches. Each search takes several seconds, but the panel searches 250 ms after you stop typing. Consider searching only on Return, or returning vector results first.
-- [ ] Add loading, error, and "backend offline" states to the UI.
-- [ ] Load real **Recent Files** with a new backend endpoint (using `lastOpened` metadata). The list is empty for now. The new `/files` endpoint could be a starting point.
-- [ ] Launch and manage the Python backend from the Mac app, or run it as a background service.
-
-### Indexing
-- [x] Add an indexing entry point: `POST /process/{folder_path}`, called by the app when a folder is added.
-- [x] Let users choose which folders Sift can access (Settings window and first-run prompt).
-- [x] Send newly chosen folders to the backend so it indexes them.
-- [ ] Re-send saved folders on launch, and stop removing a folder in Settings from leaving its files in the index. Removing a folder only revokes access, and the index keeps its files.
-- [ ] Make indexing non-blocking. `POST /process` holds the request open until it finishes, and a second request while one is running would share the same progress counters.
-- [ ] Implement `watcher.py` to re-index files automatically when they're created, edited, or deleted.
-- [ ] Skip files that haven't changed, and remove stale vectors and metadata when a file is re-indexed or deleted. Adding the same folder again currently inserts duplicate rows.
-- [ ] Add `.docx` support (`ParseWord` is a stub, and `.docx` is currently sent to the PDF parser).
-- [ ] Add image support (`ParseImage` is a stub). This would need OCR or a vision model for captions.
-
-### Backend cleanup and fixes
-- [ ] Replace the `sys.path` workaround in `app.py` with proper package imports in `services/`.
-- [x] Let the user choose the DB location (asked on first launch, changeable in Settings).
-- [ ] Move model names into a config file or environment variables.
-- [ ] Decide whether to use `ChunkSummarizer` (per-chunk keyword extraction) in the pipeline, or remove it.
-- [ ] Replace `print` debugging with proper logging, and add error handling around Ollama calls.
-
-### Search quality and performance
-- [ ] Make the number of results configurable (it's currently fixed at 5 chunks).
-- [ ] Filter searches by file type, date, or folder using the metadata table.
-- [ ] Tune chunk size and overlap (currently 1000 characters with 100 overlap).
-- [ ] Reduce memory and latency. Ollama inference and keeping several models loaded at once are the main costs.
 
 ### Testing and packaging
 - [ ] Add unit tests for the chunker, parser, and search pipeline.
